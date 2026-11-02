@@ -27,6 +27,9 @@ export default function Calibrate() {
   const [busy, setBusy] = useState<string | null>(null);
   const [left, setLeft] = useState(0);
   const [swap, setSwap] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [neutral, setNeutral] = useState<Record<string, { mean: number; std: number }> | null>(null);
   const [moves, setMoves] = useState<Partial<Record<Key, Move>>>({});
   const holds = useRef<Record<string, number | null>>({});
@@ -101,16 +104,30 @@ export default function Calibrate() {
     setMoves(m => ({ ...m, [mv.k]: { peak, range, threshold: nm.mean + 0.5 * range, detectable, sideDelta } }));
   }
   async function save() {
-    const sb = supabase(); const { data: { user } } = await sb.auth.getUser();
-    if (!user) { setMsg("Please log in first (go to the home page), then come back."); return; }
-    const { error } = await sb.from("calibration_profiles").insert({ user_id: user.id, summary: { version: 1, neutral, moves, swapLR: swap,
-      note: "Camera-derived estimates in face-size-normalised units; not clinical measurements." } });
-    setMsg(error ? error.message : "Calibration saved to your account. No images were stored.");
+    setSaving(true); setSaveMsg(null); setSaved(false);
+    try {
+      const sb = supabase(); const { data: { user } } = await sb.auth.getUser();
+      if (!user) { setSaveMsg("You’re not logged in, so there’s nowhere to save. Go to the home page, log in, then come back to /calibrate."); setSaving(false); return; }
+      const { error } = await sb.from("calibration_profiles").insert({ user_id: user.id, summary: { version: 1, neutral, moves, swapLR: swap,
+        note: "Camera-derived estimates in face-size-normalised units; not clinical measurements." } });
+      if (error) setSaveMsg(`Couldn’t save: ${error.message}`);
+      else { setSaved(true); stop(); }
+    } catch (e: any) { setSaveMsg(`Couldn’t save: ${e?.message ?? e}`); }
+    setSaving(false);
   }
 
   const q = f?.q; const ok = !!(q?.face && q.size && q.light);
   const Badge = ({ good, text }: { good: boolean; text: string }) =>
     <span className={`rounded-full px-3 py-1 text-xs ${good ? "bg-sage/40" : "bg-gold/30"}`}>{text}</span>;
+
+  if (saved) return (
+    <main className="mx-auto max-w-md px-6 pt-24">
+      <h1 className="font-display text-3xl">Calibration saved.</h1>
+      <p className="mt-4 text-navy/70">Your personal movement targets are saved to your account. No images were stored, and the camera is now off.</p>
+      <a href="/dashboard" className="btn-primary mt-8 inline-flex w-full items-center justify-center">Back to dashboard</a>
+      <button className="btn-quiet mt-3 w-full" onClick={() => { setSaved(false); }}>Recalibrate</button>
+    </main>
+  );
 
   return (
     <main className="mx-auto max-w-md px-6 pb-16 pt-[max(2rem,env(safe-area-inset-top))]">
@@ -156,7 +173,9 @@ export default function Calibrate() {
                 {c.sideDelta && <div className="mt-1 text-xs text-navy/60">Left {c.sideDelta[0].toFixed(3)} · Right {c.sideDelta[1].toFixed(3)} (camera-derived estimates, unvalidated)</div>}
               </div>}
             </div>); })}</div>
-          <button className="btn-primary mt-6 w-full" disabled={!Object.values(moves).some(m => m?.detectable)} onClick={save}>Save calibration</button>
+          {!Object.values(moves).some(m => m?.detectable) && <p className="mt-6 text-sm text-navy/70">Record at least one movement above (with a clear change) to unlock saving.</p>}
+          <button className="btn-primary mt-4 w-full" disabled={saving || saved || !Object.values(moves).some(m => m?.detectable)} onClick={save}>{saving ? "Saving…" : saved ? "Saved ✓" : "Save calibration"}</button>
+          {saveMsg && <p role="alert" className="mt-3 rounded-2xl bg-lav/40 p-3 text-sm">{saveMsg}</p>}
         </>}
       </section>}
     </main>
