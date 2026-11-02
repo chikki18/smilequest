@@ -115,7 +115,7 @@ export default function Flyer() {
   const [prof, setProf] = useState<Prof>({ total: 0, kind: "bird", color: "", acc: "" });
   const [dbMsg, setDbMsg] = useState<string | null>(null);
   const [sel, setSel] = useState<K>("smile"), [rotate, setRotate] = useState(false), [rotSec, setRotSec] = useState(20);
-  const [mode, setMode] = useState<"hold" | "pulse">("hold"), [minutes, setMinutes] = useState(6), [gap, setGap] = useState(290), [restEvery, setRestEvery] = useState(15), [gain, setGain] = useState(1.7), [pace, setPace] = useState(75);
+  const [mode, setMode] = useState<"path" | "hold" | "pulse">("path"), [minutes, setMinutes] = useState(6), [gap, setGap] = useState(290), [restEvery, setRestEvery] = useState(15), [gain, setGain] = useState(1.7), [pace, setPace] = useState(75);
   const [preview, setPreview] = useState(true), [msg, setMsg] = useState<string | null>(null), [busy, setBusy] = useState(false);
   const [ui, setUi] = useState({ lev: 0, adjust: false, paused: false, done: false, score: 0, got: 0, inRest: false, key: "smile" as K, ease: 0 });
   const [result, setResult] = useState({ score: 0, got: 0, time: 0, longest: 0, holds: 0, pauses: 0, bumps: 0, rests: 0, unlocked: [] as string[], keys: [] as string[], saved: true });
@@ -209,7 +209,13 @@ export default function Flyer() {
       if (s.ease > 0) s.ease = Math.max(0, s.ease - dt);
       if (s.lev >= HOVER) { s.cur += dt; s.longest = Math.max(s.longest, s.cur); } else { if (s.cur >= .5) s.holds++; s.cur = 0; }
       const e = s.ease > 0 ? .25 : 1;
-      if (o.mode === "hold") { const tv = (HOVER - s.lev) * (s.ease > 0 ? 70 : 222); s.vy += (tv - s.vy) * Math.min(1, dt * 4); }
+      if (o.mode === "path") {
+        const ahead = s.coins.find(c => !c.got && c.x - s.scroll > BX - 12 && c.x - s.scroll < BX + 170);
+        const pil = s.pillars.find(q => q.x - s.scroll + 30 > BX);
+        const aim = ahead ? ahead.y : (pil && pil.x - s.scroll < BX + 200 ? pil.c : GROUND / 2 - 40);
+        if (s.lev >= HOVER) s.vy += (clamp((aim - s.y) * 3, -200, 200) - s.vy) * Math.min(1, dt * 6);
+        else s.vy += ((s.ease > 0 ? 0 : 70) - s.vy) * Math.min(1, dt * 2.5);
+      } else if (o.mode === "hold") { const tv = (HOVER - s.lev) * (s.ease > 0 ? 70 : 222); s.vy += (tv - s.vy) * Math.min(1, dt * 4); }
       else { if (s.lev > .45 && s.ready) { s.vy = -250; s.ready = false; } if (s.lev < .25) s.ready = true; s.vy = clamp(s.vy + 520 * e * dt, -260, 300); }
       s.scroll += o.speed * dt; s.invuln = Math.max(0, s.invuln - dt);
       if (s.assist) { s.assist.t += dt; const k = Math.min(1, s.assist.t / .5); s.y = s.assist.from + (s.assist.to - s.assist.from) * (k * k * (3 - 2 * k)); s.vy = 0; if (k >= 1) s.assist = null; }
@@ -292,7 +298,7 @@ export default function Flyer() {
     if (phase === "menu") return (
       <main className="mx-auto max-w-md px-6 pb-12 pt-[max(2rem,env(safe-area-inset-top))]">
         <h1 className="font-display text-3xl">Mirror Flight</h1>
-        <p className="mt-3 text-navy/70">Glide through the gaps and collect coins using your own gentle movements. Hold your movement to rise, relax to sink softly. If you bump a pillar you’re simply guided back on track. Only use movements your clinician has approved.</p>
+        <p className="mt-3 text-navy/70">Glide through the gaps and collect coins using your own gentle movements. Hold your movement and the bird flies the path for you. Relax and it drifts down gently. If you bump a pillar you’re simply guided back on track. Only use movements your clinician has approved.</p>
         <div className="mt-4 flex items-center justify-between rounded-2xl bg-paper p-4 shadow-soft"><span>🪙 <b>{prof.total}</b> coins</span><button className="btn-quiet min-h-[44px] px-4" onClick={() => setPhase("custom")}>Customize your flyer</button></div>
         <h2 className="mt-6 font-display text-xl">Your movement</h2>
         <div className="mt-2 grid gap-3" role="radiogroup">{KEYS.filter(k => cal[k]).map(k => (
@@ -300,7 +306,7 @@ export default function Flyer() {
         {Object.keys(cal).length > 1 && <label className="mt-3 flex items-center gap-3 text-sm"><input type="checkbox" className="h-5 w-5 accent-teal" checked={rotate} onChange={e => setRotate(e.target.checked)} />Rotate through all my calibrated movements</label>}
         {rotate && <label className="mt-2 block text-sm">Change movement every<select className="field mt-1" value={rotSec} onChange={e => setRotSec(+e.target.value)}>{[10, 20, 30].map(n => <option key={n} value={n}>{n} seconds</option>)}</select></label>}
         <div className="mt-5 grid gap-3 text-sm">
-          <label>Control style<select className="field mt-1" value={mode} onChange={e => setMode(e.target.value as "hold" | "pulse")}><option value="hold">Hold to rise, relax to sink (recommended)</option><option value="pulse">Pulse to flap</option></select></label>
+          <label>Control style<select className="field mt-1" value={mode} onChange={e => setMode(e.target.value as "path" | "hold" | "pulse")}><option value="path">Hold to stay on the path (recommended)</option><option value="hold">Hold to rise, relax to sink</option><option value="pulse">Pulse to flap</option></select></label>
           <label>Flight length<select className="field mt-1" value={minutes} onChange={e => setMinutes(+e.target.value)}><option value={3}>3 minutes</option><option value={6}>6 minutes</option><option value={10}>10 minutes</option><option value={0}>No limit (stop when I rest)</option></select></label>
           <label>Gap size<select className="field mt-1" value={gap} onChange={e => setGap(+e.target.value)}><option value={250}>Wide</option><option value={290}>Extra wide (recommended)</option><option value={330}>Huge</option></select></label>
           <label>Rest meadow<select className="field mt-1" value={restEvery} onChange={e => setRestEvery(+e.target.value)}><option value={10}>Every 10 seconds</option><option value={15}>Every 15 seconds (recommended)</option><option value={25}>Every 25 seconds</option><option value={0}>Off</option></select></label>
@@ -318,7 +324,7 @@ export default function Flyer() {
           <canvas ref={cvRef} className="h-full w-full" style={{ objectFit: "contain" }} aria-label="Side-scrolling flight. Hold your movement to rise and relax to sink." />
           <div className="absolute left-3 top-3 rounded-full bg-paper/90 px-4 py-2 text-sm shadow-soft" role="status">🪙 {ui.got}</div>
           <div className="absolute inset-x-3 top-14 rounded-2xl bg-paper/85 p-2 text-center text-xs shadow-soft" role="status">
-            {ui.ease > 0 ? `Now: ${NAMES[ui.key]}. Take a moment to get ready.` : `${NAMES[ui.key]}: hold past the line to rise, relax to sink`}</div>
+            {ui.ease > 0 ? `Now: ${NAMES[ui.key]}. Take a moment to get ready.` : `${NAMES[ui.key]}: ${mode === "path" ? "hold past the line and the bird flies the path. Relax and it drifts down" : "hold past the line to rise, relax to sink"}`}</div>
           {(ui.adjust || ui.paused) && <div className="absolute inset-0 z-30 grid place-items-center bg-navy/60 p-8 text-center text-ivory" role="alert"><div>
             <p className="font-display text-2xl">{ui.paused ? "Paused" : "Let’s adjust your camera"}</p>
             <p className="mt-2 text-sm">{ui.paused ? "Take as long as you need." : "We can’t see your face clearly. Center it and add light. The game waits and nothing is counted against you."}</p>
@@ -327,7 +333,7 @@ export default function Flyer() {
         <div className="shrink-0 bg-paper p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className="relative h-3 rounded-full bg-mist" role="progressbar" aria-label="Your movement" aria-valuenow={Math.round(ui.lev * 100)} aria-valuemin={0} aria-valuemax={100}>
             <div className="h-3 rounded-full bg-teal transition-[width] duration-100" style={{ width: `${ui.lev * 100}%` }} /><div className="absolute -top-1 h-5 w-0.5 bg-navy/60" style={{ left: `${HOVER * 100}%` }} /></div>
-          <p className="mt-1 text-xs text-navy/60">{ui.inRest ? "Rest meadow: relax and float." : "Past the line = rise. Relaxed = glide down gently."}</p>
+          <p className="mt-1 text-xs text-navy/60">{ui.inRest ? "Rest meadow: relax and float." : (mode === "path" ? "Past the line = the bird stays on the path. Relaxed = drifts down gently." : "Past the line = rise. Relaxed = glide down gently.")}</p>
           <div className="mt-2 flex items-center gap-2 text-xs"><span className="flex-1">Sensitivity {Math.max(1, GAINS.indexOf(gain) + 1)} of 5. Not rising? Try Easier. Rising too fast? Try Harder.</span>
             <button className="btn-quiet min-h-[44px] px-4" onClick={() => setGain(GAINS[Math.min(GAINS.length - 1, Math.max(0, GAINS.indexOf(gain)) + 1)])}>Easier</button>
             <button className="btn-quiet min-h-[44px] px-4" onClick={() => setGain(GAINS[Math.max(0, Math.max(0, GAINS.indexOf(gain)) - 1)])}>Harder</button></div>
