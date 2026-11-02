@@ -1,0 +1,9 @@
+@tailwind base; @tailwind components; @tailwind utilities;
+body { background:#FAF6EE; color:#1B2A3A; font-family:var(--font-body),system-ui,sans-serif; -webkit-tap-highlight-color:transparent; }
+:focus-visible { outline:3px solid #4E8A86; outline-offset:2px; }
+@media (prefers-reduced-motion: reduce) { *{animation:none!important;transition:none!important} }
+@media (prefers-contrast: more) { body{color:#000} .text-navy\/60{color:#1B2A3A} }
+.btn { @apply min-h-[52px] rounded-full px-7 font-medium transition active:scale-[.98] disabled:opacity-40; }
+.btn-primary { @apply btn bg-navy text-ivory hover:bg-navy/90; }
+.btn-quiet { @apply btn border border-navy/15 bg-paper text-navy hover:bg-mist/60; }
+.field { @apply min-h-[52px] w-full rounded-2xl border border-navy/15 bg-paper px-4 text-base; }
