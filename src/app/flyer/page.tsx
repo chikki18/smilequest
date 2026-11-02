@@ -8,7 +8,8 @@ type Move = { threshold: number; range: number; detectable: boolean; nm: number 
 const KEYS = ["smile", "brow", "pucker", "close"] as const;
 type K = typeof KEYS[number];
 const NAMES: Record<K, string> = { smile: "Gentle smile", brow: "Eyebrow raise", pucker: "Soft lip pucker", close: "Gentle eye closure" };
-const W = 360, H = 640, GROUND = 520, BX = 100, TAU = Math.PI * 2, SPEED = 100;
+const W = 360, H = 640, GROUND = 520, BX = 100, TAU = Math.PI * 2, HOVER = .36;
+const GAINS = [1, 1.3, 1.7, 2.2, 3];
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
 type Prof = { total: number; kind: string; color: string; acc: string };
@@ -19,15 +20,20 @@ const UNLOCKS = [{ need: 25, label: "Bird colors" }, { need: 50, label: "More co
 
 type Pil = { x: number; c: number; gap: number; passed: boolean };
 type Coin = { x: number; y: number; got: boolean };
-type Rest = { x0: number; x1: number };
+type Rest = { x0: number; x1: number; warm?: boolean };
 const fresh = () => ({
   t: 0, scroll: 0, y: GROUND / 2 - 40, vy: 0, lev: 0, ready: true,
   pillars: [] as Pil[], coins: [] as Coin[], rests: [] as Rest[], spawnX: W + 160, prev: GROUND / 2 - 40, dist: 0,
   score: 0, got: 0, cur: 0, longest: 0, holds: 0, pauses: 0, adjust: false, lostSince: null as number | null, manual: false,
-  assist: null as null | { t: number; from: number; to: number }, invuln: 0, bumps: 0, restsSeen: 0, inRest: false, wasRest: false,
+  assist: null as null | { t: number; from: number; to: number }, invuln: 0, bumps: 0, restsSeen: 0, inRest: false, wasRest: false, inWarm: false,
   ease: 2.5, rotT: 0, key: "smile" as K, flap: 0, done: false, finished: false, used: {} as Record<string, number>,
 });
 type G = ReturnType<typeof fresh>;
+function warmUp(s: G, speed: number) {
+  const len = speed * 9; s.rests.push({ x0: 0, x1: len, warm: true });
+  for (let i = 0; i < 8; i++) s.coins.push({ x: 150 + i * (len - 210) / 7, y: GROUND / 2 + (i % 2 ? 1 : -1) * 70, got: false });
+  s.spawnX = len + 200; s.prev = GROUND / 2 - 40;
+}
 
 function drawCritter(c: CanvasRenderingContext2D, x: number, y: number, ang: number, kind: string, body: string, acc: string, flap: number, sc = 1) {
   const dark = "#2b3340";
@@ -96,7 +102,8 @@ function drawWorld(c: CanvasRenderingContext2D, s: G, now: number, body: string,
   if (!(s.invuln > 0 && Math.floor(now / 120) % 2)) drawCritter(c, BX, s.y, clamp(s.vy / 400, -.5, .7), kind, body, acc, s.flap);
   c.textAlign = "center"; c.lineJoin = "round";
   c.font = "bold 54px system-ui, sans-serif"; c.lineWidth = 7; c.strokeStyle = "#2b3340"; c.strokeText(String(s.score), W / 2, 96); c.fillStyle = "#fff"; c.fillText(String(s.score), W / 2, 96);
-  if (s.inRest) { c.font = "bold 22px system-ui, sans-serif"; c.lineWidth = 5; c.strokeText("Rest meadow", W / 2, 150); c.fillText("Rest meadow", W / 2, 150); c.font = "bold 15px system-ui, sans-serif"; c.lineWidth = 4; c.strokeText("Relax your face and float", W / 2, 174); c.fillText("Relax your face and float", W / 2, 174); }
+  if (s.inRest) { const t1 = s.inWarm ? "Warm-up" : "Rest meadow", t2 = s.inWarm ? "Try your movement. Coins are up and down." : "Relax your face and float";
+    c.font = "bold 22px system-ui, sans-serif"; c.lineWidth = 5; c.strokeText(t1, W / 2, 150); c.fillText(t1, W / 2, 150); c.font = "bold 15px system-ui, sans-serif"; c.lineWidth = 4; c.strokeText(t2, W / 2, 174); c.fillText(t2, W / 2, 174); }
 }
 
 export default function Flyer() {
@@ -108,12 +115,12 @@ export default function Flyer() {
   const [prof, setProf] = useState<Prof>({ total: 0, kind: "bird", color: "", acc: "" });
   const [dbMsg, setDbMsg] = useState<string | null>(null);
   const [sel, setSel] = useState<K>("smile"), [rotate, setRotate] = useState(false), [rotSec, setRotSec] = useState(20);
-  const [mode, setMode] = useState<"hold" | "pulse">("hold"), [minutes, setMinutes] = useState(6), [gap, setGap] = useState(250), [restEvery, setRestEvery] = useState(15), [gain, setGain] = useState(1.3);
+  const [mode, setMode] = useState<"hold" | "pulse">("hold"), [minutes, setMinutes] = useState(6), [gap, setGap] = useState(290), [restEvery, setRestEvery] = useState(15), [gain, setGain] = useState(1.7), [pace, setPace] = useState(75);
   const [preview, setPreview] = useState(true), [msg, setMsg] = useState<string | null>(null), [busy, setBusy] = useState(false);
   const [ui, setUi] = useState({ lev: 0, adjust: false, paused: false, done: false, score: 0, got: 0, inRest: false, key: "smile" as K, ease: 0 });
   const [result, setResult] = useState({ score: 0, got: 0, time: 0, longest: 0, holds: 0, pauses: 0, bumps: 0, rests: 0, unlocked: [] as string[], keys: [] as string[], saved: true });
-  const R = useRef({ cal, sel, rotate, rotSec, mode, gap, restEvery, gain, minutes, prof });
-  R.current = { cal, sel, rotate, rotSec, mode, gap, restEvery, gain, minutes, prof };
+  const R = useRef({ cal, sel, rotate, rotSec, mode, gap, restEvery, gain, minutes, prof, speed: pace });
+  R.current = { cal, sel, rotate, rotSec, mode, gap, restEvery, gain, minutes, prof, speed: pace };
 
   useEffect(() => { (async () => {
     const sb = supabase();
@@ -149,7 +156,7 @@ export default function Flyer() {
       tracker.current = await createTracker(v, f => { latest.current = f; });
       const sb = supabase(); const { data: { user } } = await sb.auth.getUser();
       if (user) await sb.from("consent_records").insert({ user_id: user.id, kind: "camera_processing", granted: true, policy_version: POLICY_VERSION });
-      g.current = fresh(); g.current.key = sel; setUi(u => ({ ...u, done: false, score: 0, got: 0 })); setPhase("play");
+      g.current = fresh(); g.current.key = sel; warmUp(g.current, pace); setUi(u => ({ ...u, done: false, score: 0, got: 0 })); setPhase("play");
     } catch (e: any) { stop(); setMsg(e?.name === "NotAllowedError" ? "Camera access is blocked. Allow it in your browser’s site settings, then try again." : `Couldn’t start the camera: ${e?.message ?? e}`); }
     setBusy(false);
   }
@@ -176,8 +183,8 @@ export default function Flyer() {
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
     let raf = 0, prev = performance.now();
     const spawn = (s: G, o: typeof R.current) => {
-      if (o.restEvery > 0 && s.dist >= o.restEvery * SPEED) {
-        const len = SPEED * 4; s.rests.push({ x0: s.spawnX, x1: s.spawnX + len });
+      if (o.restEvery > 0 && s.dist >= o.restEvery * o.speed) {
+        const len = o.speed * 4; s.rests.push({ x0: s.spawnX, x1: s.spawnX + len });
         for (let i = 0; i < 8; i++) s.coins.push({ x: s.spawnX + len * (i + .5) / 8, y: clamp(s.prev + Math.sin(i / 7 * TAU) * 60, 60, GROUND - 60), got: false });
         s.spawnX += len + 90; s.dist = 0; return;
       }
@@ -185,7 +192,7 @@ export default function Flyer() {
       const c = clamp(s.prev + (Math.random() * 2 - 1) * 100, lo, hi); s.prev = c;
       s.pillars.push({ x: s.spawnX, c, gap: o.gap, passed: false });
       s.coins.push({ x: s.spawnX, y: c + (Math.random() * 2 - 1) * half * .4, got: false });
-      s.spawnX += 240; s.dist += 240;
+      s.spawnX += 260; s.dist += 260;
     };
     const step = (dt: number, now: number) => {
       const s = g.current, o = R.current, fr = latest.current;
@@ -200,11 +207,11 @@ export default function Flyer() {
       s.lev += (l - s.lev) * .3;
       s.t += dt; s.used[s.key] = (s.used[s.key] || 0) + dt; s.flap += dt * (8 + s.lev * 12);
       if (s.ease > 0) s.ease = Math.max(0, s.ease - dt);
-      if (s.lev >= .5) { s.cur += dt; s.longest = Math.max(s.longest, s.cur); } else { if (s.cur >= .5) s.holds++; s.cur = 0; }
+      if (s.lev >= HOVER) { s.cur += dt; s.longest = Math.max(s.longest, s.cur); } else { if (s.cur >= .5) s.holds++; s.cur = 0; }
       const e = s.ease > 0 ? .25 : 1;
-      if (o.mode === "hold") s.vy = clamp(s.vy + (420 * e - 840 * e * s.lev) * dt, -240, 280);
-      else { if (s.lev > .55 && s.ready) { s.vy = -250; s.ready = false; } if (s.lev < .3) s.ready = true; s.vy = clamp(s.vy + 520 * e * dt, -260, 300); }
-      s.scroll += SPEED * dt; s.invuln = Math.max(0, s.invuln - dt);
+      if (o.mode === "hold") { const tv = (HOVER - s.lev) * (s.ease > 0 ? 70 : 222); s.vy += (tv - s.vy) * Math.min(1, dt * 4); }
+      else { if (s.lev > .45 && s.ready) { s.vy = -250; s.ready = false; } if (s.lev < .25) s.ready = true; s.vy = clamp(s.vy + 520 * e * dt, -260, 300); }
+      s.scroll += o.speed * dt; s.invuln = Math.max(0, s.invuln - dt);
       if (s.assist) { s.assist.t += dt; const k = Math.min(1, s.assist.t / .5); s.y = s.assist.from + (s.assist.to - s.assist.from) * (k * k * (3 - 2 * k)); s.vy = 0; if (k >= 1) s.assist = null; }
       else s.y += s.vy * dt;
       if (s.y < 24) { s.y = 24; s.vy = Math.max(s.vy, 0); }
@@ -216,8 +223,8 @@ export default function Flyer() {
         if (s.invuln <= 0 && !s.assist && Math.abs(BX - px) < 26 + 11 && (s.y - 11 < p.c - p.gap / 2 || s.y + 11 > p.c + p.gap / 2)) { s.assist = { t: 0, from: s.y, to: p.c }; s.invuln = 1.6; s.bumps++; }
       }
       for (const co of s.coins) if (!co.got && Math.hypot(co.x - s.scroll - BX, co.y - s.y) < 24) { co.got = true; s.got++; }
-      const wx = s.scroll + BX; s.inRest = s.rests.some(r => wx >= r.x0 && wx <= r.x1);
-      if (s.inRest && !s.wasRest) s.restsSeen++; s.wasRest = s.inRest;
+      const wx = s.scroll + BX, cr = s.rests.find(r => wx >= r.x0 && wx <= r.x1); s.inRest = !!cr; s.inWarm = !!cr?.warm;
+      if (s.inRest && !s.wasRest && !s.inWarm) s.restsSeen++; s.wasRest = s.inRest;
       if (s.pillars.length > 12) s.pillars = s.pillars.filter(p => p.x - s.scroll > -100);
       if (s.coins.length > 40) s.coins = s.coins.filter(c => c.x - s.scroll > -40);
       if (o.minutes > 0 && s.t >= o.minutes * 60) s.done = true;
@@ -295,9 +302,10 @@ export default function Flyer() {
         <div className="mt-5 grid gap-3 text-sm">
           <label>Control style<select className="field mt-1" value={mode} onChange={e => setMode(e.target.value as "hold" | "pulse")}><option value="hold">Hold to rise, relax to sink (recommended)</option><option value="pulse">Pulse to flap</option></select></label>
           <label>Flight length<select className="field mt-1" value={minutes} onChange={e => setMinutes(+e.target.value)}><option value={3}>3 minutes</option><option value={6}>6 minutes</option><option value={10}>10 minutes</option><option value={0}>No limit (stop when I rest)</option></select></label>
-          <label>Gap size<select className="field mt-1" value={gap} onChange={e => setGap(+e.target.value)}><option value={210}>Wide</option><option value={250}>Extra wide (recommended)</option><option value={290}>Easiest</option></select></label>
+          <label>Gap size<select className="field mt-1" value={gap} onChange={e => setGap(+e.target.value)}><option value={250}>Wide</option><option value={290}>Extra wide (recommended)</option><option value={330}>Huge</option></select></label>
           <label>Rest meadow<select className="field mt-1" value={restEvery} onChange={e => setRestEvery(+e.target.value)}><option value={10}>Every 10 seconds</option><option value={15}>Every 15 seconds (recommended)</option><option value={25}>Every 25 seconds</option><option value={0}>Off</option></select></label>
-          <label>Sensitivity<select className="field mt-1" value={gain} onChange={e => setGain(+e.target.value)}><option value={1}>Standard (your calibrated target)</option><option value={1.3}>Easy (recommended)</option><option value={1.7}>Very easy</option></select></label>
+          <label>Pace<select className="field mt-1" value={pace} onChange={e => setPace(+e.target.value)}><option value={60}>Very slow</option><option value={75}>Slow (recommended)</option><option value={100}>Normal</option></select></label>
+          <label>Sensitivity (you can change this during the flight too)<select className="field mt-1" value={gain} onChange={e => setGain(+e.target.value)}><option value={1}>1. Standard (your calibrated target)</option><option value={1.3}>2. Easy</option><option value={1.7}>3. Very easy (recommended)</option><option value={2.2}>4. Extra easy</option><option value={3}>5. Tiny movements count</option></select></label>
         </div>
         <p className="mt-4 text-xs text-navy/60">Your camera is processed on this device. Video is never uploaded or saved. The game never gets harder on its own.</p>
         {dbMsg && <p role="alert" className="mt-3 rounded-2xl bg-lav/40 p-3 text-sm">{dbMsg}</p>}
@@ -318,8 +326,11 @@ export default function Flyer() {
         </div>
         <div className="shrink-0 bg-paper p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className="relative h-3 rounded-full bg-mist" role="progressbar" aria-label="Your movement" aria-valuenow={Math.round(ui.lev * 100)} aria-valuemin={0} aria-valuemax={100}>
-            <div className="h-3 rounded-full bg-teal transition-[width] duration-100" style={{ width: `${ui.lev * 100}%` }} /><div className="absolute -top-1 h-5 w-0.5 bg-navy/60" style={{ left: "50%" }} /></div>
+            <div className="h-3 rounded-full bg-teal transition-[width] duration-100" style={{ width: `${ui.lev * 100}%` }} /><div className="absolute -top-1 h-5 w-0.5 bg-navy/60" style={{ left: `${HOVER * 100}%` }} /></div>
           <p className="mt-1 text-xs text-navy/60">{ui.inRest ? "Rest meadow: relax and float." : "Past the line = rise. Relaxed = glide down gently."}</p>
+          <div className="mt-2 flex items-center gap-2 text-xs"><span className="flex-1">Sensitivity {Math.max(1, GAINS.indexOf(gain) + 1)} of 5. Not rising? Try Easier. Rising too fast? Try Harder.</span>
+            <button className="btn-quiet min-h-[44px] px-4" onClick={() => setGain(GAINS[Math.min(GAINS.length - 1, Math.max(0, GAINS.indexOf(gain)) + 1)])}>Easier</button>
+            <button className="btn-quiet min-h-[44px] px-4" onClick={() => setGain(GAINS[Math.max(0, Math.max(0, GAINS.indexOf(gain)) - 1)])}>Harder</button></div>
           <div className="mt-2 grid grid-cols-4 gap-2">
             <button className="btn-quiet min-h-[44px] px-2" onClick={() => { g.current.manual = true; }}>Pause</button>
             <button className="btn-quiet min-h-[44px] px-2" onClick={() => leave("menu")}>Rest</button>
