@@ -13,7 +13,7 @@ const SPELLS: Record<string, { name: string; label: string; icon: string }> = {
 };
 const hex = (h: string) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 const mix = (a: string, b: string, t: number) => { const A = hex(a), B = hex(b); return `rgb(${A.map((x, i) => Math.round(x + (B[i] - x) * t)).join(",")})`; };
-const fresh = () => ({ charge: 0, aboveSince: null as number | null, cur: 0, longest: 0, holds: 0, time: 0, lostSince: null as number | null, adjust: false, pauses: 0, manualPause: false, complete: false });
+const fresh = () => ({ charge: 0, aboveSince: null as number | null, cur: 0, longest: 0, holds: 0, time: 0, lostSince: null as number | null, adjust: false, pauses: 0, manualPause: false, complete: false, sig: 0 });
 
 function draw(ctx: CanvasRenderingContext2D, W: number, H: number, c: number, t: number, flies: { x: number; y: number; s: number; p: number }[]) {
   const e = c * c * (3 - 2 * c), TAU = Math.PI * 2;
@@ -52,9 +52,10 @@ export default function Play() {
   const [sel, setSel] = useState<string>(""); const [holdSec, setHoldSec] = useState(3);
   const [msg, setMsg] = useState<string | null>(null); const [starting, setStarting] = useState(false);
   const [preview, setPreview] = useState(true);
-  const [ui, setUi] = useState({ charge: 0, adjust: false, paused: false, complete: false, cur: 0 });
+  const [sens, setSens] = useState(0.35);
+  const [ui, setUi] = useState({ charge: 0, adjust: false, paused: false, complete: false, cur: 0, sig: 0 });
   const [result, setResult] = useState({ holds: 0, longest: 0, time: 0, pauses: 0 });
-  const R = useRef({ moves, sel, holdSec }); R.current = { moves, sel, holdSec };
+  const R = useRef({ moves, sel, holdSec, sens }); R.current = { moves, sel, holdSec, sens };
 
   useEffect(() => { (async () => {
     const { data: { user } } = await supabase().auth.getUser();
@@ -101,7 +102,7 @@ export default function Play() {
     resize(); addEventListener("resize", resize);
     let raf = 0, prev = performance.now();
     const step = (dt: number, now: number) => {
-      const s = g.current, { moves, sel, holdSec } = R.current, m = moves[sel], fr = latest.current;
+      const s = g.current, { moves, sel, holdSec, sens } = R.current, m = moves[sel], fr = latest.current;
       if (s.manualPause || s.complete || !m) return;
       if (!(fr?.vals && fr.q.face && fr.q.size)) {   // lost tracking: pause, never count as failure
         if (s.lostSince == null) s.lostSince = now;
@@ -109,7 +110,9 @@ export default function Play() {
         s.aboveSince = null; return;
       }
       s.lostSince = null; s.adjust = false; s.time += dt;
-      if (fr.vals[sel as keyof Vals] >= m.threshold) {
+      const val = fr.vals[sel as keyof Vals], nm = m.threshold - 0.5 * m.range, thr = nm + sens * m.range;
+      s.sig = (val - nm) / (thr - nm);
+      if (val >= thr) {
         if (s.aboveSince == null) s.aboveSince = now;
         s.cur = (now - s.aboveSince) / 1000; s.longest = Math.max(s.longest, s.cur);
         s.charge = Math.min(1, s.charge + dt / holdSec);
@@ -124,14 +127,15 @@ export default function Play() {
       const r = cv.getBoundingClientRect(); draw(ctx, r.width, r.height, g.current.charge, reduce ? 0 : now, flies);
     };
     raf = requestAnimationFrame(loop);
-    const id = setInterval(() => { const s = g.current; setUi({ charge: s.charge, adjust: s.adjust, paused: s.manualPause, complete: s.complete, cur: s.cur }); }, 100);
+    const id = setInterval(() => { const s = g.current; setUi({ charge: s.charge, adjust: s.adjust, paused: s.manualPause, complete: s.complete, cur: s.cur, sig: s.sig }); }, 100);
     return () => { cancelAnimationFrame(raf); clearInterval(id); removeEventListener("resize", resize); };
   }, [phase]);
 
   const sp = SPELLS[sel];
   const videoEl = <video ref={video} playsInline muted aria-label="Your camera preview (mirrored)"
-    className={phase === "play" && preview ? "absolute right-3 top-24 z-20 h-24 w-32 -scale-x-100 rounded-2xl object-cover shadow-soft" : "pointer-events-none absolute h-px w-px opacity-0"} />;
+    className={phase === "play" && preview ? "fixed right-3 top-28 z-40 h-24 w-32 -scale-x-100 rounded-2xl object-cover shadow-soft" : "pointer-events-none fixed h-px w-px opacity-0"} />;
 
+  const body = () => {
   if (phase === "loading") return <main className="grid min-h-dvh place-items-center text-navy/60">Loading…</main>;
   if (phase === "nocal") return (
     <main className="mx-auto max-w-md px-6 pt-24"><h1 className="font-display text-3xl">Let’s set up your camera first.</h1>
@@ -148,7 +152,7 @@ export default function Play() {
       <button className="btn-primary mt-6 w-full" onClick={() => setPhase("pick")}>Play again</button>
       <a className="btn-quiet mt-3 inline-flex w-full items-center justify-center" href="/dashboard">Back to dashboard</a></main>);
   if (phase === "pick") return (
-    <main className="mx-auto max-w-md px-6 pb-12 pt-[max(2rem,env(safe-area-inset-top))]">{videoEl}
+    <main className="mx-auto max-w-md px-6 pb-12 pt-[max(2rem,env(safe-area-inset-top))]">
       <h1 className="font-display text-3xl">The Forgotten Lantern</h1>
       <p className="mt-3 text-navy/70">The forest has gone dark. Hold a gentle movement and the lantern will glow brighter. Rest whenever you like; the light only fades slowly. Only choose a movement your clinician has approved.</p>
       <h2 className="mt-6 font-display text-xl">Choose your spell</h2>
@@ -158,13 +162,15 @@ export default function Play() {
           {SPELLS[k].icon} <b>{SPELLS[k].name}</b> · {SPELLS[k].label}</button>))}</div>
       <label className="mt-5 block text-sm">Hold length<select className="field mt-1" value={holdSec} onChange={e => setHoldSec(+e.target.value)}>
         {[2, 3, 5, 8].map(n => <option key={n} value={n}>{n} seconds</option>)}</select></label>
+      <label className="mt-4 block text-sm">Sensitivity<select className="field mt-1" value={sens} onChange={e => setSens(+e.target.value)}>
+        <option value={0.25}>Very easy (lights up with a small movement)</option><option value={0.35}>Easy (recommended)</option><option value={0.5}>Standard (your calibrated target)</option></select></label>
       <p className="mt-4 text-xs text-navy/60">Your camera is processed on this device. Video is never uploaded or saved.</p>
       {msg && <p role="alert" className="mt-3 rounded-2xl bg-lav/40 p-3 text-sm">{msg}</p>}
       <button className="btn-primary mt-5 w-full" disabled={starting} onClick={begin}>{starting ? "Starting camera…" : "Start camera and play"}</button>
     </main>);
 
   return (
-    <div className="fixed inset-0 bg-navy">{videoEl}
+    <div className="fixed inset-0 bg-navy">
       <canvas ref={canvas} className="h-full w-full" aria-label="Forest scene. The lantern grows brighter as you hold your movement." />
       <div className="absolute inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-10 rounded-2xl bg-paper/90 p-4 text-sm shadow-soft backdrop-blur" role="status">
         {ui.complete ? "The path appears through the trees. Thank you, apprentice. The forest is safe again."
@@ -178,6 +184,7 @@ export default function Play() {
         <div className="flex items-center justify-between text-sm"><span>{sp.icon} <b>{sp.name}</b></span><span className="text-navy/60">{ui.complete ? "Complete" : ui.cur > 0 ? `Holding ${ui.cur.toFixed(1)} s` : "Resting is fine"}</span></div>
         <div className="mt-2 h-3 rounded-full bg-mist" role="progressbar" aria-valuenow={Math.round(ui.charge * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Lantern charge">
           <div className="h-3 rounded-full bg-gold transition-[width] duration-100" style={{ width: `${ui.charge * 100}%` }} /></div>
+        <p className="mt-2 text-xs text-navy/60" aria-live="off">Your movement: {Math.max(0, Math.round(ui.sig * 100))}% of your target (the lantern charges at 100%)</p>
         <div className="mt-3 flex flex-wrap gap-2">
           {ui.complete ? <button className="btn-primary min-h-[44px] flex-1" onClick={finish}>See summary</button> : <>
             <button className="btn-quiet min-h-[44px] flex-1" onClick={() => { g.current.manualPause = true; }}>Pause</button>
@@ -186,4 +193,6 @@ export default function Play() {
           <a className="btn-quiet inline-flex min-h-[44px] items-center" href="/dashboard" onClick={stop}>Exit</a>
         </div></div>
     </div>);
+  };
+  return <>{videoEl}{body()}</>;
 }
