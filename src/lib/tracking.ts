@@ -1,5 +1,5 @@
 // Reusable face tracking engine (MediaPipe Face Landmarker). Runs on-device; no video is uploaded or stored.
-export type Vals = { smile:number; brow:number; pucker:number; close:number; liftL:number; liftR:number; browL:number; browR:number; closeL:number; closeR:number };
+export type Vals = { smile:number; brow:number; pucker:number; close:number; liftL:number; liftR:number; browL:number; browR:number; closeL:number; closeR:number; frown:number; sideA:number; sideB:number };
 export type Quality = { face:boolean; size:boolean; light:boolean; fps:number };
 export type Frame = { t:number; vals:Vals|null; q:Quality };
 const V = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
@@ -60,7 +60,8 @@ export async function createTracker(video: HTMLVideoElement, onFrame: (f: Frame)
     for (const k of r.faceBlendshapes?.[0]?.categories ?? []) bs[k.categoryName] = k.score;
     let closeL = bs.eyeBlinkLeft ?? 0, closeR = bs.eyeBlinkRight ?? 0;
     if (swap) [closeL, closeR] = [closeR, closeL];
-    const raw: Vals = { liftL, liftR, browL, browR, closeL, closeR, smile: (liftL + liftR) / 2, brow: (browL + browR) / 2, close: (closeL + closeR) / 2, pucker: bs.mouthPucker ?? 0 };
+    const raw: Vals = { liftL, liftR, browL, browR, closeL, closeR, smile: (liftL + liftR) / 2, brow: (browL + browR) / 2, close: (closeL + closeR) / 2, pucker: bs.mouthPucker ?? 0,
+      frown: 0.6 * (((bs.mouthFrownLeft ?? 0) + (bs.mouthFrownRight ?? 0)) / 2) + 0.4 * (((bs.browDownLeft ?? 0) + (bs.browDownRight ?? 0)) / 2), sideA: bs.mouthLeft ?? 0, sideB: bs.mouthRight ?? 0 };
     const size = iod / W > 0.1 && iod / W < 0.45 && P[1].x > 0.1 && P[1].x < 0.9 && P[1].y > 0.1 && P[1].y < 0.9;
     if (!sm) sm = raw; else for (const k of Object.keys(raw) as (keyof Vals)[]) sm[k] = sm[k] * 0.65 + raw[k] * 0.35; // temporal smoothing
     emit({ ...sm }, true, size);
