@@ -73,71 +73,144 @@ function spawnRow(s: G, len: number) {
   s.spawnZ += Math.max(22, 36 - 12 * p) + rnd(0, 6);
 }
 
+function ridge(c: CanvasRenderingContext2D, y: number, col: string, amp: number, f: number, ph: number, sh: number) {
+  c.fillStyle = col; c.beginPath(); c.moveTo(0, y);
+  for (let x = 0; x <= W + 12; x += 12) c.lineTo(x, y - amp * (.55 + .3 * Math.sin((x + sh) * f + ph) + .15 * Math.sin((x + sh) * f * 2.7 + ph * 2)));
+  c.lineTo(W, y); c.closePath(); c.fill();
+}
+function stoneRect(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, sc: number, base: string, lite: string) {
+  const g = c.createLinearGradient(x, 0, x + w, 0); g.addColorStop(0, lite); g.addColorStop(.55, base); g.addColorStop(1, "#2c241b");
+  c.fillStyle = g; c.fillRect(x, y, w, h);
+  c.fillStyle = "rgba(255,240,200,.14)"; c.fillRect(x, y, w, Math.max(1, 3 * sc));
+  c.strokeStyle = "rgba(12,9,6,.75)"; c.lineWidth = Math.max(1, 1.6 * sc); c.strokeRect(x, y, w, h);
+  c.strokeStyle = "rgba(12,9,6,.35)"; c.lineWidth = Math.max(.7, 1 * sc); c.beginPath(); c.moveTo(x + w * .3, y + h * .12); c.lineTo(x + w * .42, y + h * .5); c.lineTo(x + w * .34, y + h * .8); c.stroke();
+}
+function moss(c: CanvasRenderingContext2D, x: number, y: number, w: number, sc: number) {
+  c.fillStyle = "#4f7a3c"; c.beginPath(); c.moveTo(x, y); for (let i = 0; i <= 6; i++) c.lineTo(x + w * i / 6, y + (i % 2 ? 7 : 2) * sc); c.lineTo(x + w, y - 2 * sc); c.lineTo(x, y - 2 * sc); c.closePath(); c.fill();
+}
+function glyph(c: CanvasRenderingContext2D, x: number, y: number, r: number, col: string) {
+  c.strokeStyle = col; c.lineWidth = Math.max(1, r * .22); c.beginPath(); c.arc(x, y, r, 0, 7); c.moveTo(x - r * .5, y); c.lineTo(x + r * .5, y); c.moveTo(x, y - r * .5); c.lineTo(x, y + r * .5); c.stroke();
+}
+function drawFox(c: CanvasRenderingContext2D, px: number, y0: number, bodyH: number, lift: number, s: G, now: number) {
+  const hy = y0 - bodyH - 6, sw = Math.sin(now / 75), tw = Math.sin(now / 150) * 9 * (lift > 5 ? .4 : 1);
+  c.lineJoin = "round"; c.strokeStyle = "#20120a"; c.lineWidth = 1.6;
+  // tail
+  const tg = c.createLinearGradient(px, y0, px + 40, y0 - 50); tg.addColorStop(0, "#c95f25"); tg.addColorStop(.7, "#e0813a"); tg.addColorStop(1, "#f6e6c8");
+  c.fillStyle = tg; c.beginPath(); c.moveTo(px + 3, y0 - 20); c.bezierCurveTo(px + 24, y0 - 14, px + 44 + tw, y0 - 34, px + 38 + tw, y0 - 58); c.bezierCurveTo(px + 24 + tw, y0 - 46, px + 14, y0 - 38, px - 2, y0 - 32); c.closePath(); c.fill(); c.stroke();
+  // legs
+  const run = lift > 5 ? 0 : 1;
+  for (const [dx, ph] of [[-9, 0], [3, Math.PI]] as [number, number][]) { const up = Math.max(0, Math.sin(now / 75 + ph)) * 6 * run;
+    c.fillStyle = "#3b2616"; c.beginPath(); c.roundRect(px + dx, y0 - 20 - up, 7, 20, 3); c.fill(); c.stroke(); c.fillStyle = "#1e120a"; c.beginPath(); c.roundRect(px + dx - 1, y0 - 5 - up, 9, 5, 2); c.fill(); }
+  // pack + jet
+  if (s.jet > .05) { const fl = 14 + Math.random() * 12 + s.jet * 14; for (const dx of [-11, 5]) { const fg = c.createLinearGradient(0, y0 - bodyH + 26, 0, y0 - bodyH + 26 + fl); fg.addColorStop(0, "#fff6d6"); fg.addColorStop(.4, "#7fd6ff"); fg.addColorStop(1, "rgba(80,150,255,0)"); c.fillStyle = fg; c.beginPath(); c.moveTo(px + dx, y0 - bodyH + 26); c.lineTo(px + dx + 7, y0 - bodyH + 26); c.lineTo(px + dx + 3.5, y0 - bodyH + 26 + fl); c.closePath(); c.fill(); } }
+  // body
+  const bg = c.createLinearGradient(px - 17, 0, px + 17, 0); bg.addColorStop(0, "#e07a32"); bg.addColorStop(1, "#a84a1c");
+  c.fillStyle = bg; c.beginPath(); c.roundRect(px - 16, y0 - bodyH + 2, 32, bodyH - 14, 12); c.fill(); c.stroke();
+  c.fillStyle = s.jet > .05 ? "#b98a3a" : "#5a3a1e"; c.beginPath(); c.roundRect(px - 12, y0 - bodyH + 8, 24, Math.max(14, bodyH * .42), 4); c.fill(); c.stroke();
+  if (s.jet > .05) { c.fillStyle = "#3a2a10"; c.fillRect(px - 11, y0 - bodyH + 24, 7, 4); c.fillRect(px + 4, y0 - bodyH + 24, 7, 4); }
+  // scarf
+  c.fillStyle = "#1f8f8a"; c.beginPath(); c.ellipse(px, y0 - bodyH + 2, 15, 5, 0, 0, 7); c.fill(); c.stroke();
+  c.beginPath(); c.moveTo(px - 12, y0 - bodyH + 3); c.quadraticCurveTo(px - 30 - sw * 3, y0 - bodyH + 6 + sw * 3, px - 40 - sw * 4, y0 - bodyH - 2 + sw * 5); c.lineTo(px - 38 - sw * 4, y0 - bodyH + 8 + sw * 5); c.quadraticCurveTo(px - 26, y0 - bodyH + 12, px - 8, y0 - bodyH + 8); c.closePath(); c.fill(); c.stroke();
+  // head and ears
+  c.fillStyle = "#d4672a"; for (const sd of [-1, 1]) { c.beginPath(); c.moveTo(px + sd * 13, hy - 6); c.lineTo(px + sd * 12, hy - 28); c.lineTo(px + sd * 2, hy - 13); c.closePath(); c.fill(); c.stroke(); c.fillStyle = "#2a1a0e"; c.beginPath(); c.moveTo(px + sd * 12, hy - 28); c.lineTo(px + sd * 11, hy - 20); c.lineTo(px + sd * 6, hy - 17); c.closePath(); c.fill(); c.fillStyle = "#d4672a"; }
+  const hg = c.createRadialGradient(px - 4, hy - 4, 2, px, hy, 16); hg.addColorStop(0, "#f09a50"); hg.addColorStop(1, "#c85c22");
+  c.fillStyle = hg; c.beginPath(); c.ellipse(px, hy, 15, 14, 0, 0, 7); c.fill(); c.stroke();
+}
 function drawWorld(c: CanvasRenderingContext2D, s: G, now: number) {
-  const wh = s.wh, PY = s.py, cx = W / 2, yOf = (sc: number) => HZ + (PY - HZ) * sc;
-  const sky = c.createLinearGradient(0, 0, 0, HZ + 30); sky.addColorStop(0, "#8fd3f4"); sky.addColorStop(1, "#fdf0d5");
-  c.fillStyle = sky; c.fillRect(0, 0, W, wh); c.fillStyle = "#9ad0a0"; c.fillRect(0, HZ, W, wh - HZ);
-  c.fillStyle = "#ffe9a8"; c.beginPath(); c.arc(285, HZ - 38, 22, 0, 7); c.fill();
-  c.fillStyle = "#b7cfe0"; for (let i = 0; i < 9; i++) { const h = 20 + ((i * 53) % 34); c.fillRect(i * 44 - 6, HZ - h, 36, h); }
-  // runway bands
+  const wh = s.wh, PY = s.py, cx = W / 2, yOf = (sc: number) => HZ + (PY - HZ) * sc, shift = (s.lanePos - 1) * 14;
+  // sky
+  const sky = c.createLinearGradient(0, 0, 0, HZ + 6); sky.addColorStop(0, "#0a1b22"); sky.addColorStop(.55, "#285043"); sky.addColorStop(1, "#e3a25a"); c.fillStyle = sky; c.fillRect(0, 0, W, HZ + 6);
+  const sg = c.createRadialGradient(cx + 40, HZ - 8, 4, cx + 40, HZ - 8, 130); sg.addColorStop(0, "rgba(255,230,160,.95)"); sg.addColorStop(.25, "rgba(255,190,100,.5)"); sg.addColorStop(1, "rgba(255,170,80,0)"); c.fillStyle = sg; c.fillRect(0, 0, W, HZ + 6);
+  ridge(c, HZ + 2, "#27493d", 46, .021, 1.2, shift * .3); ridge(c, HZ + 2, "#17302a", 30, .034, 3.4, shift * .6);
+  // distant temple
+  c.fillStyle = "#101f1b"; for (let i = 0; i < 4; i++) { const w = 130 - i * 30, h = 11; c.fillRect(cx - 40 - w / 2 + shift * .8, HZ - 6 - (i + 1) * h, w, h); }
+  c.fillRect(cx - 40 - 12 + shift * .8, HZ - 6 - 4 * 11 - 14, 24, 14); c.fillStyle = "rgba(255,196,110,.9)"; c.fillRect(cx - 40 - 3 + shift * .8, HZ - 6 - 4 * 11 - 8, 6, 8);
+  // jungle floor
+  const fl = c.createLinearGradient(0, HZ, 0, wh); fl.addColorStop(0, "#22362a"); fl.addColorStop(1, "#0d1610"); c.fillStyle = fl; c.fillRect(0, HZ, W, wh - HZ);
+  // path
   const b0 = Math.floor(s.dist / 4);
-  for (let i = 30; i >= 0; i--) {
-    const zn = (b0 + i) * 4 - s.dist, zf = zn + 4, sn = sOf(Math.max(zn, -8)), sf = sOf(zf);
-    c.fillStyle = (b0 + i) % 2 ? "#6f7d8c" : "#657384";
-    c.beginPath(); c.moveTo(cx - 150 * sf, yOf(sf)); c.lineTo(cx + 150 * sf, yOf(sf)); c.lineTo(cx + 150 * sn, yOf(sn)); c.lineTo(cx - 150 * sn, yOf(sn)); c.closePath(); c.fill();
+  for (let i = 30; i >= -2; i--) {
+    const zn = (b0 + i) * 4 - s.dist, zf = zn + 4, sn = sOf(Math.max(zn, -8)), sf = sOf(zf), odd = (b0 + i) % 2;
+    c.fillStyle = odd ? "#6f6250" : "#665a49"; c.beginPath(); c.moveTo(cx - 150 * sf, yOf(sf)); c.lineTo(cx + 150 * sf, yOf(sf)); c.lineTo(cx + 150 * sn, yOf(sn)); c.lineTo(cx - 150 * sn, yOf(sn)); c.closePath(); c.fill();
+    for (const sd of [-1, 1]) { c.fillStyle = odd ? "#4d6b3b" : "#436134"; c.beginPath(); c.moveTo(cx + sd * 150 * sf, yOf(sf)); c.lineTo(cx + sd * 172 * sf, yOf(sf)); c.lineTo(cx + sd * 172 * sn, yOf(sn)); c.lineTo(cx + sd * 150 * sn, yOf(sn)); c.closePath(); c.fill(); }
+    c.strokeStyle = "rgba(14,10,6,.5)"; c.lineWidth = Math.max(.6, 1.6 * sn); c.beginPath(); c.moveTo(cx - 150 * sn, yOf(sn)); c.lineTo(cx + 150 * sn, yOf(sn)); c.stroke();
   }
-  c.strokeStyle = "rgba(255,255,255,.55)"; c.lineWidth = 2.5;
-  for (const x of [-50, 50]) { c.beginPath(); c.moveTo(cx + x * sOf(120), yOf(sOf(120))); c.lineTo(cx + x * sOf(-8), yOf(sOf(-8))); c.stroke(); }
-  c.strokeStyle = "#f6f1e3"; c.lineWidth = 4; for (const x of [-150, 150]) { c.beginPath(); c.moveTo(cx + x * sOf(120), yOf(sOf(120))); c.lineTo(cx + x * sOf(-8), yOf(sOf(-8))); c.stroke(); }
-  // scenery
-  const k0 = Math.ceil(s.dist / 14);
-  for (let i = 8; i >= 0; i--) for (const side of [-1, 1]) {
-    const idx = k0 + i, z = idx * 14 - s.dist, sc = sOf(z); if (sc > 1.3) continue;
-    const bw = 62 * sc, bh = (70 + ((idx * 37 + (side > 0 ? 11 : 0)) % 80)) * sc * 1.3, x = cx + side * (178 * sc) + (side > 0 ? 0 : -bw), y = yOf(sc);
-    c.fillStyle = ["#e9b8a2", "#a7c4d6", "#d9c7e8", "#f2d88f"][(idx + (side > 0 ? 1 : 0)) % 4]; c.fillRect(x, y - bh, bw, bh);
-    c.fillStyle = "rgba(255,255,255,.55)"; for (let r = 0; r < 3; r++) c.fillRect(x + bw * .15, y - bh + bh * (.12 + r * .28), bw * .25, bh * .12);
+  c.strokeStyle = "rgba(10,7,4,.35)"; c.lineWidth = 2; for (const x of [-50, 50]) { c.beginPath(); c.moveTo(cx + x * sOf(120), yOf(sOf(120))); c.lineTo(cx + x * sOf(-8), yOf(sOf(-8))); c.stroke(); }
+  c.strokeStyle = "#2c2419"; c.lineWidth = 3; for (const x of [-150, 150]) { c.beginPath(); c.moveTo(cx + x * sOf(120), yOf(sOf(120))); c.lineTo(cx + x * sOf(-8), yOf(sOf(-8))); c.stroke(); }
+  // trees and torches
+  const k0 = Math.ceil(s.dist / 9);
+  for (let i = 12; i >= 0; i--) for (const side of [-1, 1]) {
+    const idx = k0 + i, z = idx * 9 - s.dist, sc = sOf(z); if (sc > 1.35) continue; const y = yOf(sc), h = (idx * 37 + (side > 0 ? 11 : 0)) % 100;
+    const x = cx + side * (205 + h % 40) * sc; c.globalAlpha = clamp(1.3 - z / 90, .2, 1);
+    c.fillStyle = "#2a1e14"; c.fillRect(x - 9 * sc, y - 210 * sc, 18 * sc, 210 * sc);
+    for (const [ox, oy, r, col] of [[0, -215, 62, "#16301f"], [-34, -190, 46, "#1b3a26"], [32, -196, 48, "#12281a"]] as [number, number, number, string][]) { c.fillStyle = col; c.beginPath(); c.arc(x + ox * sc, y + oy * sc, r * sc, 0, 7); c.fill(); }
+    if (idx % 3 === 0) { const tx = cx + side * 164 * sc, ty = y - 40 * sc; c.fillStyle = "#4a4132"; c.fillRect(tx - 5 * sc, ty, 10 * sc, 40 * sc); const fr = 22 * sc * (1 + .12 * Math.sin(now / 90 + idx)); const fg = c.createRadialGradient(tx, ty - 6 * sc, 1, tx, ty - 6 * sc, fr * 2); fg.addColorStop(0, "rgba(255,200,110,.9)"); fg.addColorStop(.4, "rgba(255,130,40,.4)"); fg.addColorStop(1, "rgba(255,110,30,0)"); c.fillStyle = fg; c.beginPath(); c.arc(tx, ty - 6 * sc, fr * 2, 0, 7); c.fill(); c.fillStyle = "#ffd27a"; c.beginPath(); c.ellipse(tx, ty - 6 * sc, 4.5 * sc, 8 * sc, 0, 0, 7); c.fill(); }
+    c.globalAlpha = 1;
   }
+  const fog = c.createLinearGradient(0, HZ - 6, 0, HZ + 120); fog.addColorStop(0, "rgba(232,168,98,.55)"); fog.addColorStop(1, "rgba(232,168,98,0)"); c.fillStyle = fog; c.fillRect(0, HZ - 6, W, 126);
   // objects far -> near
   type Obj = { d: number; draw: () => void };
   const objs: Obj[] = [];
   for (const r of s.rows) {
     const d = r.z - s.dist; if (d > 95 || d < -6) continue; const sc = sOf(d), y = yOf(sc);
-    objs.push({ d, draw: () => { for (const l of r.lanes) {
-      const x = cx + (l - 1) * LANE * sc; c.lineWidth = Math.max(1, 2 * sc); c.strokeStyle = "#2b3340";
-      if (r.kind === "hurdle") { c.fillStyle = "#f2994a"; c.fillRect(x - 39 * sc, y - 38 * sc, 78 * sc, 38 * sc); c.strokeRect(x - 39 * sc, y - 38 * sc, 78 * sc, 38 * sc); c.fillStyle = "#fff4d6"; for (let i = 0; i < 4; i++) c.fillRect(x - 39 * sc + i * 20 * sc, y - 38 * sc, 9 * sc, 38 * sc); }
-      else if (r.kind === "bar") { c.fillStyle = "#555"; c.fillRect(x - 40 * sc, y - 88 * sc, 8 * sc, 88 * sc); c.fillRect(x + 32 * sc, y - 88 * sc, 8 * sc, 88 * sc); c.fillStyle = "#e85d75"; c.fillRect(x - 44 * sc, y - 88 * sc, 88 * sc, 24 * sc); c.strokeRect(x - 44 * sc, y - 88 * sc, 88 * sc, 24 * sc); }
-      else { c.fillStyle = r.kind === "full" ? "#6c4a7a" : "#3b5b7a"; c.fillRect(x - 42 * sc, y - 150 * sc, 84 * sc, 150 * sc); c.strokeRect(x - 42 * sc, y - 150 * sc, 84 * sc, 150 * sc); c.fillStyle = "rgba(255,255,255,.7)"; for (let a = 0; a < 3; a++) for (let b = 0; b < 2; b++) c.fillRect(x - 30 * sc + b * 36 * sc, y - 136 * sc + a * 40 * sc, 24 * sc, 22 * sc); }
-    } } });
+    objs.push({ d, draw: () => { c.globalAlpha = clamp(1.3 - d / 80, .15, 1); for (const l of r.lanes) {
+      const x = cx + (l - 1) * LANE * sc;
+      if (r.kind === "hurdle") { stoneRect(c, x - 41 * sc, y - 40 * sc, 82 * sc, 40 * sc, sc, "#7d705b", "#9b8c72"); moss(c, x - 41 * sc, y - 40 * sc, 82 * sc, sc); glyph(c, x, y - 18 * sc, 8 * sc, "rgba(255,196,110,.95)"); }
+      else if (r.kind === "bar") {
+        for (const sd of [-1, 1]) stoneRect(c, x + sd * 40 * sc - 8 * sc, y - 96 * sc, 16 * sc, 96 * sc, sc, "#766a56", "#93846b");
+        stoneRect(c, x - 52 * sc, y - 94 * sc, 104 * sc, 28 * sc, sc, "#7d705b", "#9b8c72"); moss(c, x - 52 * sc, y - 94 * sc, 104 * sc, sc); glyph(c, x, y - 80 * sc, 7 * sc, "rgba(255,196,110,.9)");
+        c.strokeStyle = "#3f6a32"; c.lineWidth = Math.max(1, 2.4 * sc); for (let i = 0; i < 5; i++) { const vx = x - 40 * sc + i * 20 * sc; c.beginPath(); c.moveTo(vx, y - 66 * sc); c.quadraticCurveTo(vx + Math.sin(now / 500 + i) * 4 * sc, y - 56 * sc, vx, y - (46 + (i * 7) % 12) * sc); c.stroke(); } }
+      else { const full = r.kind === "full"; stoneRect(c, x - 44 * sc, y - 152 * sc, 88 * sc, 152 * sc, sc, full ? "#5d4a47" : "#6c6150", full ? "#7c6460" : "#8a7d68");
+        moss(c, x - 44 * sc, y - 152 * sc, 88 * sc, sc); const gl = full ? "rgba(255,110,60,.95)" : "rgba(255,196,110,.9)";
+        c.fillStyle = gl; c.fillRect(x - 24 * sc, y - 108 * sc, 14 * sc, 5 * sc); c.fillRect(x + 10 * sc, y - 108 * sc, 14 * sc, 5 * sc); c.fillRect(x - 14 * sc, y - 84 * sc, 28 * sc, 5 * sc); glyph(c, x, y - 130 * sc, 9 * sc, gl); glyph(c, x, y - 44 * sc, 9 * sc, gl);
+        if (full) { const gg = c.createRadialGradient(x, y - 90 * sc, 4, x, y - 90 * sc, 70 * sc); gg.addColorStop(0, "rgba(255,100,40,.28)"); gg.addColorStop(1, "rgba(255,100,40,0)"); c.fillStyle = gg; c.fillRect(x - 70 * sc, y - 160 * sc, 140 * sc, 160 * sc); } }
+    } c.globalAlpha = 1; } });
   }
   for (const co of s.coins) {
     if (co.got) continue; const d = co.z - s.dist; if (d > 95 || d < -6) continue; const sc = sOf(d), y = yOf(sc), x = cx + (co.lane - 1) * LANE * sc;
-    objs.push({ d, draw: () => { const cyp = y - (16 + co.cy * 90) * sc; c.fillStyle = "#f6c945"; c.strokeStyle = "#a67c12"; c.lineWidth = Math.max(1, 2 * sc); c.beginPath(); c.ellipse(x, cyp, 11 * sc * (.7 + .3 * Math.abs(Math.sin(now / 250 + co.z))), 11 * sc, 0, 0, 7); c.fill(); c.stroke(); } });
+    objs.push({ d, draw: () => { const cyp = y - (16 + co.cy * 90) * sc, wv = .35 + .65 * Math.abs(Math.sin(now / 260 + co.z)); c.globalAlpha = clamp(1.3 - d / 80, .15, 1);
+      const gg = c.createRadialGradient(x, cyp, 1, x, cyp, 20 * sc); gg.addColorStop(0, "rgba(255,210,100,.45)"); gg.addColorStop(1, "rgba(255,210,100,0)"); c.fillStyle = gg; c.beginPath(); c.arc(x, cyp, 20 * sc, 0, 7); c.fill();
+      c.fillStyle = "#d9a02c"; c.strokeStyle = "#6e4a0c"; c.lineWidth = Math.max(1, 1.6 * sc); c.beginPath(); c.ellipse(x, cyp, 11 * sc * wv, 11 * sc, 0, 0, 7); c.fill(); c.stroke();
+      c.fillStyle = "#ffe08a"; c.beginPath(); c.ellipse(x - 1.5 * sc * wv, cyp - 1.5 * sc, 6 * sc * wv, 6 * sc, 0, 0, 7); c.fill(); c.globalAlpha = 1; } });
   }
   objs.sort((a, b) => b.d - a.d);
   for (const o of objs) if (o.d >= 0) o.draw();
   // player
   const px = cx + (s.lanePos - 1) * LANE, jumpH = s.jumpT > 0 ? Math.sin(Math.PI * (1 - s.jumpT / .7)) : 0, lift = jumpH * 80 + s.jet * 120;
-  const crouch = s.crouchT > 0 && lift < 5, bodyH = crouch ? 40 : 70, y0 = PY - lift;
-  if (!(s.invuln > 0 && Math.floor(now / 90) % 2)) {
-    c.fillStyle = "rgba(0,0,0,.25)"; c.beginPath(); c.ellipse(px, PY + 2, 24 - lift * .06, 7, 0, 0, 7); c.fill();
-    const sw = Math.sin(now / 70) * 7 * (lift > 5 ? .2 : 1);
-    c.strokeStyle = "#2b3340"; c.lineWidth = 2;
-    c.fillStyle = "#33404f"; c.fillRect(px - 12 + sw, y0 - 18, 8, 18); c.fillRect(px + 4 - sw, y0 - 18, 8, 18);
-    if (s.jet > .05) { c.fillStyle = "#8c96a3"; c.fillRect(px - 20, y0 - bodyH + 6, 10, 26); const fl = 16 + Math.random() * 14 + s.jet * 14; c.fillStyle = "#f29e4c"; c.beginPath(); c.moveTo(px - 18, y0 - bodyH + 32); c.lineTo(px - 12, y0 - bodyH + 32); c.lineTo(px - 15, y0 - bodyH + 32 + fl); c.closePath(); c.fill(); }
-    c.fillStyle = "#4E8A86"; c.beginPath(); c.roundRect(px - 16, y0 - bodyH + 6, 32, bodyH - 18, 8); c.fill(); c.stroke();
-    c.fillStyle = "#f2c9a0"; c.beginPath(); c.arc(px, y0 - bodyH - 4, 14, 0, 7); c.fill(); c.stroke();
-    c.fillStyle = "#1B2A3A"; c.beginPath(); c.arc(px, y0 - bodyH - 9, 14, Math.PI, 0); c.fill();
-    c.fillStyle = "#1B2A3A"; c.fillRect(px - 6, y0 - bodyH - 5, 3, 3); c.fillRect(px + 3, y0 - bodyH - 5, 3, 3);
-    c.strokeStyle = "#7a3e00"; c.lineWidth = 1.5; c.beginPath(); c.arc(px, y0 - bodyH, 4, .2, Math.PI - .2); c.stroke();
-  }
+  const crouch = s.crouchT > 0 && lift < 5, bodyH = crouch ? 40 : 66, y0 = PY - lift;
+  c.fillStyle = "rgba(0,0,0,.32)"; c.beginPath(); c.ellipse(px, PY + 2, 24 - lift * .07, 7, 0, 0, 7); c.fill();
+  if (lift < 5) for (let i = 0; i < 4; i++) { const t = (now / 320 + i * .25) % 1; c.fillStyle = `rgba(214,198,160,${(1 - t) * .35})`; c.beginPath(); c.arc(px + (i - 1.5) * 9, PY - t * 10, 3 + t * 6, 0, 7); c.fill(); }
+  if (!(s.invuln > 0 && Math.floor(now / 90) % 2)) drawFox(c, px, y0, bodyH, lift, s, now);
   for (const o of objs) if (o.d < 0) o.draw();
+  // embers + vignette
+  c.fillStyle = "rgba(255,190,100,.55)"; for (let i = 0; i < 16; i++) { const x = (i * 67 + Math.sin(now / 900 + i) * 14 + W) % W, y = wh - ((now * .02 * (1 + i % 3) + i * 61) % (wh - HZ)); c.beginPath(); c.arc(x, y, 1 + (i % 3) * .5, 0, 7); c.fill(); }
+  const vg = c.createRadialGradient(cx, wh * .55, wh * .25, cx, wh * .55, wh * .75); vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(5,3,2,.6)"); c.fillStyle = vg; c.fillRect(0, 0, W, wh);
 }
+
+
+const GOLD = "#d4a24c";
+function Rune({ m, size = 36, on = false }: { m: M; size?: number; on?: boolean }) {
+  const col = on ? "#1a140c" : GOLD, P: Record<M, string> = { jump: "M7 17l5-5 5 5M7 11l5-5 5 5", fly: "M12 3c3 4 5 7 5 10a5 5 0 0 1-10 0c0-3 2-6 5-10zM12 13v4", duck: "M7 7l5 5 5-5M7 13l5 5 5-5", right: "M9 5l7 7-7 7", left: "M15 5l-7 7 7 7" };
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={col} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="10.5" strokeOpacity=".45" strokeWidth="1.2" /><path d={P[m]} /></svg>;
+}
+function Face({ m, size = 140 }: { m: M | "rest"; size?: number }) {
+  const sx = m === "right" ? 5 : m === "left" ? -5 : 0;
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" stroke={GOLD} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" role="img" aria-label={m === "rest" ? "Relaxed face" : INFO[m].name}>
+      <ellipse cx="50" cy="52" rx="32" ry="38" strokeOpacity=".5" />
+      {m === "fly" ? <><path d="M26 34q9-9 18 0M56 34q9-9 18 0" /><circle cx="35" cy="46" r="4" fill={GOLD} /><circle cx="65" cy="46" r="4" fill={GOLD} /></>
+        : m === "duck" ? <><path d="M26 34l18 7M74 34l-18 7" /><circle cx="36" cy="48" r="3" fill={GOLD} /><circle cx="64" cy="48" r="3" fill={GOLD} /></>
+        : <><path d="M27 38q8-4 16 0M57 38q8-4 16 0" strokeOpacity=".7" /><circle cx="36" cy="47" r="3" fill={GOLD} /><circle cx="64" cy="47" r="3" fill={GOLD} /></>}
+      {m === "jump" ? <path d="M33 68q17 14 34 0" /> : m === "duck" ? <path d="M35 76q15-12 30 0" /> : m === "right" || m === "left" ? <circle cx={50 + sx * 2} cy="70" r="6" /> : m === "fly" ? <path d="M40 70h20" /> : <path d="M38 70h24" strokeOpacity=".7" />}
+    </svg>);
+}
+function Coin({ size = 24 }: { size?: number }) { return <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden><circle cx="12" cy="12" r="10" fill="#d9a02c" stroke="#6e4a0c" strokeWidth="1.5" /><circle cx="12" cy="12" r="6" fill="none" stroke="#ffe08a" strokeWidth="1.5" /></svg>; }
 
 type Prof = { total: number };
 type GameRow = { id: string; played_at: string; duration_seconds: number; points: number; distance: number; coins: number; cleared: number; stumbles: number; best_streak: number; top_speed: number | null; completed: boolean; per_move: any };
 type Result = { points: number; distance: number; coins: number; cleared: number; stumbles: number; bestStreak: number; topSpeed: number; seconds: number; completed: boolean; counts: Record<M, number>; saved: boolean };
 
-function Page({ children }: { children?: any }) { return <main className="mx-auto max-w-md px-6 pb-12 pt-[max(2rem,env(safe-area-inset-top))]">{children}</main>; }
+function Page({ children }: { children?: any }) { return <div className="min-h-dvh bg-gradient-to-b from-[#1b1611] to-[#0b0907] text-[#efe4c8]"><main className="mx-auto max-w-md px-6 pb-12 pt-[max(2rem,env(safe-area-inset-top))]">{children}</main></div>; }
 
 export default function Dash() {
   const video = useRef<HTMLVideoElement>(null), cvRef = useRef<HTMLCanvasElement>(null), calCv = useRef<HTMLCanvasElement>(null);
@@ -313,10 +386,10 @@ export default function Dash() {
         }
         if (!r.done && dd < -1.2) { r.done = true; if (!r.hit && r.threat) { s.cleared++; s.points += 10; s.streak++; s.best = Math.max(s.best, s.streak); s.clearedBy[r.kind] = (s.clearedBy[r.kind] ?? 0) + 1; } }
         if (!hint && !r.done && dd > 0 && dd < 45 && r.lanes.includes(s.lane) && !r.hit) {
-          if (r.kind === "hurdle") hint = "😊 Smile to jump";
-          else if (r.kind === "bar") hint = "☹️ Frown to duck";
-          else if (r.kind === "full") hint = "🤨 Raise your eyebrows to fly";
-          else { const free = [0, 1, 2].filter(l => !r.lanes.includes(l)).sort((a, b) => Math.abs(a - s.lane) - Math.abs(b - s.lane))[0]; hint = free == null ? "🤨 Raise your eyebrows to fly" : free > s.lane ? "😗 Pucker to your right" : "😗 Pucker to your left"; }
+          if (r.kind === "hurdle") hint = "Smile to jump";
+          else if (r.kind === "bar") hint = "Frown to duck";
+          else if (r.kind === "full") hint = "Raise your eyebrows to fly";
+          else { const free = [0, 1, 2].filter(l => !r.lanes.includes(l)).sort((a, b) => Math.abs(a - s.lane) - Math.abs(b - s.lane))[0]; hint = free == null ? "Raise your eyebrows to fly" : free > s.lane ? "Pucker to your right" : "Pucker to your left"; }
         }
       }
       s.hint = hint;
@@ -350,84 +423,84 @@ export default function Dash() {
   const videoEl = <video ref={video} playsInline muted aria-label="Your camera preview (mirrored)"
     className={view === "play" && preview ? "fixed z-40 -scale-x-100 rounded-2xl object-cover shadow-soft" : "pointer-events-none fixed left-0 top-0 h-1 w-1 opacity-[0.02]"}
     style={view === "play" && preview ? { right: 12, top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 8}px)`, width: 84, height: 63 } : undefined} />;
-  const choice = (on: boolean) => `rounded-2xl border ${on ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`;
+  const choice = (on: boolean) => `rounded-2xl border ${on ? "border-[#d4a24c] bg-[#d4a24c]/15 shadow-soft" : "border-[#4a4030] bg-[#1c1915]"}`;
 
   const body = () => {
-    if (view === "loading") return <main className="grid min-h-dvh place-items-center text-navy/60">Loading…</main>;
+    if (view === "loading") return <main className="grid min-h-dvh place-items-center bg-[#0b0907] text-[#a89a7a]">Loading…</main>;
 
     if (view === "clearance") return (
       <Page><h1 className="font-display text-3xl">Before you start</h1>
-        <p className="mt-3 text-navy/70">Mirror Dash asks you to make quick, gentle facial movements. Only continue if your clinician says facial exercises are okay for you, and stop any time you feel discomfort or strain.</p>
-        <p className="mt-3 text-navy/70">Your camera is used only while you play. It’s processed on your device, and video is never uploaded or saved.</p>
-        <label className="mt-5 flex items-start gap-3 rounded-2xl bg-gold/20 p-4 text-sm"><input type="checkbox" className="mt-1 h-5 w-5 accent-teal" checked={agree} onChange={e => setAgree(e.target.checked)} />
+        <p className="mt-3 text-[#bfb08c]">Mirror Dash asks you to make quick, gentle facial movements. Only continue if your clinician says facial exercises are okay for you, and stop any time you feel discomfort or strain.</p>
+        <p className="mt-3 text-[#bfb08c]">Your camera is used only while you play. It’s processed on your device, and video is never uploaded or saved.</p>
+        <label className="mt-5 flex items-start gap-3 rounded-2xl bg-[#c8943a]/20 p-4 text-sm"><input type="checkbox" className="mt-1 h-5 w-5 accent-[#d4a24c]" checked={agree} onChange={e => setAgree(e.target.checked)} />
           <span>My clinician has said gentle facial exercises are okay for me, and I understand I can stop at any time.</span></label>
-        {msg && <p role="alert" className="mt-3 rounded-2xl bg-lav/40 p-3 text-sm">{msg}</p>}
-        <button className="btn-primary mt-5 w-full" disabled={!agree || busy} onClick={confirmClearance}>{busy ? "Saving…" : "Continue"}</button>
-        <button className="btn-quiet mt-3 w-full" onClick={() => setView("hub")}>Back</button></Page>);
+        {msg && <p role="alert" className="mt-3 rounded-2xl bg-[#3a2f4a] p-3 text-sm">{msg}</p>}
+        <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-5 w-full" disabled={!agree || busy} onClick={confirmClearance}>{busy ? "Saving…" : "Continue"}</button>
+        <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => setView("hub")}>Back</button></Page>);
 
     if (view === "ready") return (
       <Page><h1 className="font-display text-3xl">How to play</h1>
-        <p className="mt-2 text-navy/70">Your runner keeps running. Use these five movements to dodge, jump and fly. The run gets faster as it goes.</p>
-        <ul className="mt-4 grid gap-2">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded-2xl bg-paper p-3 shadow-soft"><span className="text-4xl" aria-hidden>{INFO[m].icon}</span><span className="flex-1"><b>{INFO[m].action}</b><br /><span className="text-sm text-navy/70">{INFO[m].name}</span></span></li>)}</ul>
-        <p className="mt-3 text-xs text-navy/60">Bumps never end your run. You just stumble and slow down for a moment.</p>
-        {msg && <p role="alert" className="mt-3 rounded-2xl bg-lav/40 p-3 text-sm">{msg}</p>}
-        <button className="btn-primary mt-5 min-h-[64px] w-full text-xl" disabled={busy} onClick={startGame}>{busy ? "Starting camera…" : "Start running"}</button>
-        <button className="btn-quiet mt-3 w-full" onClick={() => setView("hub")}>Back</button></Page>);
+        <p className="mt-2 text-[#bfb08c]">Your runner keeps running. Use these five movements to dodge, jump and fly. The run gets faster as it goes.</p>
+        <ul className="mt-4 grid gap-2">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded-2xl bg-[#1c1915] p-3 shadow-soft"><Rune m={m} size={44} /><span className="flex-1"><b>{INFO[m].action}</b><br /><span className="text-sm text-[#bfb08c]">{INFO[m].name}</span></span></li>)}</ul>
+        <p className="mt-3 text-xs text-[#a89a7a]">Bumps never end your run. You just stumble and slow down for a moment.</p>
+        {msg && <p role="alert" className="mt-3 rounded-2xl bg-[#3a2f4a] p-3 text-sm">{msg}</p>}
+        <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-5 min-h-[64px] w-full text-xl" disabled={busy} onClick={startGame}>{busy ? "Starting camera…" : "Start running"}</button>
+        <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => setView("hub")}>Back</button></Page>);
 
     if (view === "calibrate") {
       const sm: M | "rest" | null = calStep === 1 ? "rest" : calStep >= 2 && calStep <= 6 ? MOVES[[0, 1, 2, 3, 4][calStep - 2]] : null;
       const rec = sm && sm !== "rest" ? calMoves[sm] : undefined, allOk = MOVES.every(m => calMoves[m]?.detectable);
-      const chip = (ok: boolean, t: string) => <span className={`rounded-full px-3 py-1 text-xs ${ok ? "bg-sage/40" : "bg-gold/30"}`}>{t}</span>;
+      const chip = (ok: boolean, t: string) => <span className={`rounded-full px-3 py-1 text-xs ${ok ? "bg-[#4f7a5a]/50" : "bg-[#c8943a]/30"}`}>{t}</span>;
       const canNext = calStep === 0 ? calCam === "on" : calStep === 1 ? !!calNeutral : calStep >= 2 && calStep <= 6 ? !!rec?.detectable : true;
       const title = calStep === 0 ? "Set up your camera" : calStep === 1 ? "Relaxed face" : calStep === 7 ? "All set?" : INFO[sm as M].name;
       return (
         <Page>
-          <div className="flex gap-1.5" role="progressbar" aria-valuemin={1} aria-valuemax={8} aria-valuenow={calStep + 1} aria-label={`Step ${calStep + 1} of 8`}>{Array.from({ length: 8 }, (_, n) => <div key={n} className={`h-1.5 flex-1 rounded-full ${n <= calStep ? "bg-teal" : "bg-mist"}`} />)}</div>
+          <div className="flex gap-1.5" role="progressbar" aria-valuemin={1} aria-valuemax={8} aria-valuenow={calStep + 1} aria-label={`Step ${calStep + 1} of 8`}>{Array.from({ length: 8 }, (_, n) => <div key={n} className={`h-1.5 flex-1 rounded-full ${n <= calStep ? "bg-[#d4a24c]" : "bg-[#2d2820]"}`} />)}</div>
           <h1 className="mt-5 font-display text-3xl">{title}</h1>
           {calStep <= 6 && <>
             <canvas ref={calCv} className="mt-4 w-full rounded-3xl bg-navy/90 shadow-soft" style={{ aspectRatio: "4 / 3" }} aria-label="Your camera preview (mirrored)" />
             <div className="mt-3 flex flex-wrap gap-2" aria-live="polite">{chip(!!calQ?.face, calQ?.face ? "Face visible" : "No face yet")}{chip(!!calQ?.size, "Distance")}{chip(!!calQ?.light, "Lighting")}</div></>}
-          {calStatus && <p role="status" className="mt-3 rounded-2xl bg-teal/15 p-4 text-center font-display text-2xl">{calStatus}</p>}
-          {calMsg && <p role="alert" className="mt-3 rounded-2xl bg-lav/40 p-3 text-sm">{calMsg}</p>}
-          {calStep === 0 && <section className="mt-4"><p className="text-navy/70">Your camera is processed on this device. Video is never uploaded or saved. We’ll record your relaxed face, then each of the five movements once. Go gently.</p>
-            <button className="btn-primary mt-4 min-h-[60px] w-full text-lg" disabled={calCam !== "off"} onClick={startCal}>{calCam === "loading" ? "Starting camera…" : calCam === "on" ? "Camera is on ✓" : "Start camera"}</button></section>}
-          {calStep === 1 && <section className="mt-4 flex flex-col items-center text-center"><div className="text-7xl" aria-hidden>😐</div>
+          {calStatus && <p role="status" className="mt-3 rounded-2xl bg-[#d4a24c]/15 p-4 text-center font-display text-2xl">{calStatus}</p>}
+          {calMsg && <p role="alert" className="mt-3 rounded-2xl bg-[#3a2f4a] p-3 text-sm">{calMsg}</p>}
+          {calStep === 0 && <section className="mt-4"><p className="text-[#bfb08c]">Your camera is processed on this device. Video is never uploaded or saved. We’ll record your relaxed face, then each of the five movements once. Go gently.</p>
+            <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" disabled={calCam !== "off"} onClick={startCal}>{calCam === "loading" ? "Starting camera…" : calCam === "on" ? "Camera is on ✓" : "Start camera"}</button></section>}
+          {calStep === 1 && <section className="mt-4 flex flex-col items-center text-center"><Face m="rest" size={150} />
             <p className="mt-3 text-lg">Look at the camera with a comfortable, relaxed face.</p>
-            <button className="btn-primary mt-4 min-h-[60px] w-full text-lg" disabled={calBusy || calCam !== "on"} onClick={doNeutral}>{calNeutral ? "Record again" : "Record relaxed face (3 seconds)"}</button>
-            {calNeutral && !calBusy && <p className="mt-3 text-sm text-navy/70">Got it. Your relaxed face is recorded.</p>}</section>}
-          {calStep >= 2 && calStep <= 6 && sm && sm !== "rest" && <section className="mt-4 flex flex-col items-center text-center"><div className="text-7xl" aria-hidden>{INFO[sm].icon}</div>
-            <p className="mt-3 text-xl">{INFO[sm].cue}</p><p className="mt-1 text-sm text-navy/70">{INFO[sm].tip}</p>
-            <button className="btn-primary mt-4 min-h-[60px] w-full text-lg" disabled={calBusy || calCam !== "on"} onClick={() => doMove(sm)}>{rec ? "Record again" : "Record (4 seconds)"}</button>
-            {rec && !calBusy && <p className="mt-3 text-sm text-navy/70">{rec.detectable ? "Great. We picked up a clear movement." : "We couldn’t pick up a clear change this time. That’s okay. Try again, a little more or slower."}</p>}</section>}
+            <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" disabled={calBusy || calCam !== "on"} onClick={doNeutral}>{calNeutral ? "Record again" : "Record relaxed face (3 seconds)"}</button>
+            {calNeutral && !calBusy && <p className="mt-3 text-sm text-[#bfb08c]">Got it. Your relaxed face is recorded.</p>}</section>}
+          {calStep >= 2 && calStep <= 6 && sm && sm !== "rest" && <section className="mt-4 flex flex-col items-center text-center"><Face m={sm} size={150} />
+            <p className="mt-3 text-xl">{INFO[sm].cue}</p><p className="mt-1 text-sm text-[#bfb08c]">{INFO[sm].tip}</p>
+            <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" disabled={calBusy || calCam !== "on"} onClick={() => doMove(sm)}>{rec ? "Record again" : "Record (4 seconds)"}</button>
+            {rec && !calBusy && <p className="mt-3 text-sm text-[#bfb08c]">{rec.detectable ? "Great. We picked up a clear movement." : "We couldn’t pick up a clear change this time. That’s okay. Try again, a little more or slower."}</p>}</section>}
           {calStep === 7 && <section className="mt-4"><ul className="grid gap-2">{MOVES.map(m => { const mv = calMoves[m]; return (
-            <li key={m} className="flex items-center gap-3 rounded-2xl bg-paper p-3 shadow-soft"><span className="text-3xl" aria-hidden>{INFO[m].icon}</span><span className="flex-1">{INFO[m].action}</span><span className="text-sm text-navy/70">{mv?.detectable ? "Ready ✓" : mv ? "Not detected" : "Not recorded"}</span></li>); })}</ul>
-            <p className="mt-3 text-xs text-navy/60">Mirror Dash uses all five movements. You can recalibrate any time from Settings.</p>
-            <button className="btn-primary mt-4 min-h-[60px] w-full text-lg" disabled={!allOk || calSaving} onClick={saveCal}>{calSaving ? "Saving…" : "Save calibration"}</button>
-            {!allOk && <p className="mt-2 text-sm text-navy/70">Go back and record any movement that isn’t marked Ready.</p>}</section>}
+            <li key={m} className="flex items-center gap-3 rounded-2xl bg-[#1c1915] p-3 shadow-soft"><Rune m={m} size={34} /><span className="flex-1">{INFO[m].action}</span><span className="text-sm text-[#bfb08c]">{mv?.detectable ? "Ready ✓" : mv ? "Not detected" : "Not recorded"}</span></li>); })}</ul>
+            <p className="mt-3 text-xs text-[#a89a7a]">Mirror Dash uses all five movements. You can recalibrate any time from Settings.</p>
+            <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" disabled={!allOk || calSaving} onClick={saveCal}>{calSaving ? "Saving…" : "Save calibration"}</button>
+            {!allOk && <p className="mt-2 text-sm text-[#bfb08c]">Go back and record any movement that isn’t marked Ready.</p>}</section>}
           <div className="mt-6 flex gap-3">
-            <button className="btn-quiet" disabled={calBusy || calSaving} onClick={() => (calStep === 0 ? closeCalibrate(false) : setCalStep(calStep - 1))}>{calStep === 0 ? "Cancel" : "Back"}</button>
-            {calStep < 7 && <button className="btn-primary flex-1" disabled={calBusy || !canNext} onClick={() => setCalStep(calStep + 1)}>Next</button>}
+            <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0]" disabled={calBusy || calSaving} onClick={() => (calStep === 0 ? closeCalibrate(false) : setCalStep(calStep - 1))}>{calStep === 0 ? "Cancel" : "Back"}</button>
+            {calStep < 7 && <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] flex-1" disabled={calBusy || !canNext} onClick={() => setCalStep(calStep + 1)}>Next</button>}
           </div>
         </Page>);
     }
 
     if (view === "settings") return (
       <Page><h1 className="font-display text-3xl">Settings</h1>
-        <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">1. Calibrate</h2>
-          <p className="mt-1 text-sm text-navy/70">{hasCal ? "Ready: all five movements." : "Not set up yet. Calibrating teaches the game your own comfortable movements."}</p>
-          <button className="btn-primary mt-3 w-full" onClick={() => openCalibrate("settings")}>{hasCal ? "Recalibrate" : "Calibrate"}</button></section>
-        <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">2. Run length</h2>
+        <section className="mt-5 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">1. Calibrate</h2>
+          <p className="mt-1 text-sm text-[#bfb08c]">{hasCal ? "Ready: all five movements." : "Not set up yet. Calibrating teaches the game your own comfortable movements."}</p>
+          <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-3 w-full" onClick={() => openCalibrate("settings")}>{hasCal ? "Recalibrate" : "Calibrate"}</button></section>
+        <section className="mt-3 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">2. Run length</h2>
           <div className="mt-3 grid grid-cols-3 gap-2" role="radiogroup" aria-label="Run length">{LENS.map(v => <button key={v} role="radio" aria-checked={st.len === v} onClick={() => update({ len: v })} className={`min-h-[56px] ${choice(st.len === v)}`}>{v}s</button>)}</div></section>
-        <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">3. Starting speed</h2>
+        <section className="mt-3 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">3. Starting speed</h2>
           <div className="mt-3 grid grid-cols-3 gap-2" role="radiogroup" aria-label="Starting speed">{STARTS.map(x => <button key={x.v} role="radio" aria-checked={st.start === x.v} onClick={() => update({ start: x.v })} className={`min-h-[56px] ${choice(st.start === x.v)}`}>{x.n}</button>)}</div></section>
-        <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">4. How much it speeds up</h2>
+        <section className="mt-3 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">4. How much it speeds up</h2>
           <div className="mt-3 grid grid-cols-3 gap-2" role="radiogroup" aria-label="Speed increase">{RAMPS.map(x => <button key={x.v} role="radio" aria-checked={st.ramp === x.v} onClick={() => update({ ramp: x.v })} className={`min-h-[56px] ${choice(st.ramp === x.v)}`}>{x.n}</button>)}</div>
-          <p className="mt-2 text-xs text-navy/60">By the end of the run you’ll be going about {st.ramp}× your starting speed.</p></section>
-        <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>5. Hints</b><br /><span className="text-sm text-navy/60">Show which movement to make for the next obstacle.</span></span>
-          <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.hints} onChange={e => update({ hints: e.target.checked })} aria-label="Hints" /></label>
-        <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>6. Vibration</b><br /><span className="text-sm text-navy/60">Buzz after calibration steps, at the start, and when you stumble. Works on phones that allow it.</span></span>
-          <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.haptics} onChange={e => update({ haptics: e.target.checked })} aria-label="Vibration" /></label>
-        <button className="btn-primary mt-4 w-full" onClick={() => setView("hub")}>Done</button></Page>);
+          <p className="mt-2 text-xs text-[#a89a7a]">By the end of the run you’ll be going about {st.ramp}× your starting speed.</p></section>
+        <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><span><b>5. Hints</b><br /><span className="text-sm text-[#a89a7a]">Show which movement to make for the next obstacle.</span></span>
+          <input type="checkbox" className="h-7 w-7 accent-[#d4a24c]" checked={st.hints} onChange={e => update({ hints: e.target.checked })} aria-label="Hints" /></label>
+        <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><span><b>6. Vibration</b><br /><span className="text-sm text-[#a89a7a]">Buzz after calibration steps, at the start, and when you stumble. Works on phones that allow it.</span></span>
+          <input type="checkbox" className="h-7 w-7 accent-[#d4a24c]" checked={st.haptics} onChange={e => update({ haptics: e.target.checked })} aria-label="Vibration" /></label>
+        <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-4 w-full" onClick={() => setView("hub")}>Done</button></Page>);
 
     if (view === "stats") {
       const gs = games ?? [], done = gs.length, best = (f: (x: GameRow) => number) => gs.reduce((m, x) => Math.max(m, f(x)), 0);
@@ -436,33 +509,33 @@ export default function Dash() {
       const rows = gs.slice(0, 12).reverse(), dm = Math.max(1, ...rows.map(x => x.distance));
       return (
         <Page><h1 className="font-display text-3xl">Your stats</h1>
-          <button className="btn-primary mt-4 min-h-[60px] w-full text-lg" onClick={onPlay}>Play game</button>
-          {games === null && <p className="mt-6 text-navy/60">Loading…</p>}
-          {games && done === 0 && <p className="mt-6 rounded-2xl bg-paper p-5 text-navy/70 shadow-soft">No runs yet. Your first one will show up here.</p>}
+          <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" onClick={onPlay}>Play game</button>
+          {games === null && <p className="mt-6 text-[#a89a7a]">Loading…</p>}
+          {games && done === 0 && <p className="mt-6 rounded-2xl bg-[#1c1915] p-5 text-[#bfb08c] shadow-soft">No runs yet. Your first one will show up here.</p>}
           {done > 0 && <>
-            <dl className="mt-5 grid grid-cols-2 gap-3">{tiles.map(([k, v]) => <div key={k} className="rounded-2xl bg-paper p-4 shadow-soft"><dd className="font-display text-3xl">{v}</dd><dt className="text-xs text-navy/60">{k}</dt></div>)}</dl>
-            <section className="mt-6 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">Distance, last {rows.length} runs</h2>
-              <div className="mt-3 grid gap-2">{rows.map(x => <div key={x.id} className="flex items-center gap-3 text-sm"><span className="w-14 text-navy/60">{fmtDate(x.played_at)}</span><div className="h-3 flex-1 rounded-full bg-mist"><div className="h-3 rounded-r-full bg-teal" style={{ width: `${Math.max(2, x.distance / dm * 100)}%` }} /></div><span className="w-14 text-right">{x.distance} m</span></div>)}</div></section>
-            <section className="mt-4 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">Movements made</h2><p className="text-xs text-navy/60">Total times across all runs.</p>
-              <div className="mt-3 grid gap-3">{MOVES.map(m => <div key={m}><div className="flex justify-between text-sm"><span>{INFO[m].icon} {INFO[m].action}</span><span>{tot[m]}</span></div><div className="mt-1 h-2.5 rounded-full bg-mist"><div className="h-2.5 rounded-r-full bg-teal" style={{ width: `${tot[m] / mx * 100}%` }} /></div></div>)}</div></section>
-            <section className="mt-4 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">Recent runs</h2>
-              <ul className="mt-3 grid gap-3 text-sm">{gs.slice(0, 8).map(x => <li key={x.id} className="flex justify-between gap-3"><span>{fmtDate(x.played_at)} · {x.points} pts{x.completed ? "" : " (ended early)"}</span><span className="text-right text-navy/60">{x.distance} m · {x.coins} coins · {x.cleared} cleared · {x.stumbles} stumbles</span></li>)}</ul></section></>}
-          <button className="btn-quiet mt-6 w-full" onClick={() => setView("hub")}>Back</button></Page>);
+            <dl className="mt-5 grid grid-cols-2 gap-3">{tiles.map(([k, v]) => <div key={k} className="rounded-2xl bg-[#1c1915] p-4 shadow-soft"><dd className="font-display text-3xl">{v}</dd><dt className="text-xs text-[#a89a7a]">{k}</dt></div>)}</dl>
+            <section className="mt-6 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">Distance, last {rows.length} runs</h2>
+              <div className="mt-3 grid gap-2">{rows.map(x => <div key={x.id} className="flex items-center gap-3 text-sm"><span className="w-14 text-[#a89a7a]">{fmtDate(x.played_at)}</span><div className="h-3 flex-1 rounded-full bg-[#2d2820]"><div className="h-3 rounded-r-full bg-[#d4a24c]" style={{ width: `${Math.max(2, x.distance / dm * 100)}%` }} /></div><span className="w-14 text-right">{x.distance} m</span></div>)}</div></section>
+            <section className="mt-4 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">Movements made</h2><p className="text-xs text-[#a89a7a]">Total times across all runs.</p>
+              <div className="mt-3 grid gap-3">{MOVES.map(m => <div key={m}><div className="flex justify-between text-sm"><span>{INFO[m].action}</span><span>{tot[m]}</span></div><div className="mt-1 h-2.5 rounded-full bg-[#2d2820]"><div className="h-2.5 rounded-r-full bg-[#d4a24c]" style={{ width: `${tot[m] / mx * 100}%` }} /></div></div>)}</div></section>
+            <section className="mt-4 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">Recent runs</h2>
+              <ul className="mt-3 grid gap-3 text-sm">{gs.slice(0, 8).map(x => <li key={x.id} className="flex justify-between gap-3"><span>{fmtDate(x.played_at)} · {x.points} pts{x.completed ? "" : " (ended early)"}</span><span className="text-right text-[#a89a7a]">{x.distance} m · {x.coins} coins · {x.cleared} cleared · {x.stumbles} stumbles</span></li>)}</ul></section></>}
+          <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-6 w-full" onClick={() => setView("hub")}>Back</button></Page>);
     }
 
     if (view === "results" && result) {
       const R = result;
       return (
         <Page><h1 className="font-display text-3xl">{R.completed ? "Run complete." : "Run ended early."}</h1>
-          <p className="mt-2 text-navy/70">Nice work. Every run counts.</p>
-          <div className="mt-5 grid grid-cols-2 gap-3">{([["Points", String(R.points)], ["Distance", `${R.distance} m`], ["Coins", String(R.coins)], ["Obstacles cleared", String(R.cleared)], ["Stumbles", String(R.stumbles)], ["Top speed", `${R.topSpeed.toFixed(1)}`]] as [string, string][]).map(([k, v]) => <div key={k} className="rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-3xl">{v}</div><div className="text-xs text-navy/60">{k}</div></div>)}
-            <div className="col-span-2 rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-3xl">{R.bestStreak}</div><div className="text-xs text-navy/60">Best streak (obstacles cleared in a row)</div></div></div>
-          <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">Movements made</h2>
-            <ul className="mt-3 grid gap-2">{MOVES.map(m => <li key={m} className="flex items-center gap-3 text-sm"><span className="text-2xl" aria-hidden>{INFO[m].icon}</span><span className="flex-1">{INFO[m].action}</span><b>{R.counts[m]}</b></li>)}</ul></section>
-          {!R.saved && <p role="alert" className="mt-4 rounded-2xl bg-lav/40 p-4 text-sm">{msg ?? "Saving this run…"}</p>}
-          <button className="btn-primary mt-6 min-h-[60px] w-full text-lg" onClick={onPlay}>Run again</button>
-          <button className="btn-quiet mt-3 w-full" onClick={openStats}>See my stats</button>
-          <button className="btn-quiet mt-3 w-full" onClick={() => setView("hub")}>Home</button></Page>);
+          <p className="mt-2 text-[#bfb08c]">Nice work. Every run counts.</p>
+          <div className="mt-5 grid grid-cols-2 gap-3">{([["Points", String(R.points)], ["Distance", `${R.distance} m`], ["Coins", String(R.coins)], ["Obstacles cleared", String(R.cleared)], ["Stumbles", String(R.stumbles)], ["Top speed", `${R.topSpeed.toFixed(1)}`]] as [string, string][]).map(([k, v]) => <div key={k} className="rounded-2xl bg-[#1c1915] p-4 shadow-soft"><div className="font-display text-3xl">{v}</div><div className="text-xs text-[#a89a7a]">{k}</div></div>)}
+            <div className="col-span-2 rounded-2xl bg-[#1c1915] p-4 shadow-soft"><div className="font-display text-3xl">{R.bestStreak}</div><div className="text-xs text-[#a89a7a]">Best streak (obstacles cleared in a row)</div></div></div>
+          <section className="mt-5 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">Movements made</h2>
+            <ul className="mt-3 grid gap-2">{MOVES.map(m => <li key={m} className="flex items-center gap-3 text-sm"><Rune m={m} size={30} /><span className="flex-1">{INFO[m].action}</span><b>{R.counts[m]}</b></li>)}</ul></section>
+          {!R.saved && <p role="alert" className="mt-4 rounded-2xl bg-[#3a2f4a] p-4 text-sm">{msg ?? "Saving this run…"}</p>}
+          <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-6 min-h-[60px] w-full text-lg" onClick={onPlay}>Run again</button>
+          <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={openStats}>See my stats</button>
+          <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => setView("hub")}>Home</button></Page>);
     }
 
     if (view === "play") return (
@@ -471,49 +544,53 @@ export default function Dash() {
           <canvas ref={cvRef} style={{ width: "100%", height: "100%" }} aria-label="Three-lane runner. Use your facial movements to dodge, jump, duck and fly." />
         </div>
         <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center">
-          <div className="w-full rounded-b-3xl bg-paper/95 shadow-soft" style={{ maxWidth: Math.max(box.w, 320), paddingTop: "env(safe-area-inset-top, 0px)" }}>
-            <div className="flex items-center justify-between gap-2 px-4" style={{ height: TOPBAR }} role="status">
-              <div><div className="font-display text-3xl leading-none">{ui.dist}<span className="text-base"> m</span></div><div className="text-xs text-navy/60">Speed ×{ui.mul.toFixed(1)}</div></div>
-              <div className="text-center"><div className="font-display text-3xl leading-none">🪙 {ui.coins}</div><div className="text-xs text-navy/60">coins</div></div>
-              <div className="grid h-16 w-16 shrink-0 place-items-center rounded-full border-4 border-teal text-2xl font-bold" aria-label={`${ui.left} seconds left`}>{ui.left}</div>
+          <div className="w-full rounded-b-3xl border-b border-x border-[#d4a24c]/40 bg-[#100d0a]/80 shadow-soft backdrop-blur" style={{ maxWidth: Math.max(box.w, 320), paddingTop: "env(safe-area-inset-top, 0px)" }}>
+            <div className="flex items-center justify-between gap-2 px-5" style={{ height: TOPBAR }} role="status">
+              <div><div className="font-display text-4xl leading-none text-[#e9c26a]">{ui.dist}<span className="ml-1 text-sm text-[#a89a7a]">m</span></div><div className="mt-1 text-[11px] uppercase tracking-widest text-[#a89a7a]">Speed ×{ui.mul.toFixed(1)}</div></div>
+              <div className="text-center"><div className="flex items-center justify-center gap-1.5 font-display text-3xl leading-none text-[#efe4c8]"><Coin size={26} /> {ui.coins}</div><div className="mt-1 text-[11px] uppercase tracking-widest text-[#a89a7a]">Relics</div></div>
+              <div className="relative grid h-16 w-16 shrink-0 place-items-center" aria-label={`${ui.left} seconds left`}>
+                <svg width="64" height="64" viewBox="0 0 64 64" className="absolute inset-0 -rotate-90" aria-hidden><circle cx="32" cy="32" r="28" fill="none" stroke="#3a3225" strokeWidth="5" /><circle cx="32" cy="32" r="28" fill="none" stroke="#d4a24c" strokeWidth="5" strokeLinecap="round" strokeDasharray={175.9} strokeDashoffset={175.9 * (1 - ui.left / cfg.current.len)} /></svg>
+                <span className="font-display text-xl text-[#efe4c8]">{ui.left}</span></div>
             </div></div></div>
-        {st.hints && ui.stage === "play" && ui.hint && <div className="pointer-events-none absolute inset-x-0 z-20 flex justify-center px-4" style={{ top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 10}px)` }}><div className="rounded-full bg-navy/85 px-5 py-2 text-lg text-ivory shadow-soft" role="status">{ui.hint}</div></div>}
-        {ui.stumble && ui.stage === "play" && <div className="pointer-events-none absolute inset-x-0 z-20 text-center text-sm font-semibold text-navy" style={{ top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 56}px)` }}>Stumble. Keep going!</div>}
-        <button aria-label="Pause" onClick={() => { g.current.manual = true; }} className="absolute z-20 grid h-14 w-14 place-items-center rounded-full bg-paper/90 shadow-soft" style={{ left: 12, top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 10}px)` }}>
-          <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden><rect x="4" y="3" width="5" height="16" rx="1.5" fill="#1B2A3A" /><rect x="13" y="3" width="5" height="16" rx="1.5" fill="#1B2A3A" /></svg></button>
+        {st.hints && ui.stage === "play" && ui.hint && <div className="pointer-events-none absolute inset-x-0 z-20 flex justify-center px-4" style={{ top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 10}px)` }}><div className="rounded-full border border-[#d4a24c]/60 bg-[#100d0a]/85 px-5 py-2 font-display text-lg tracking-wide text-[#efe4c8] shadow-soft" role="status">{ui.hint}</div></div>}
+        {ui.stumble && ui.stage === "play" && <div className="pointer-events-none absolute inset-x-0 z-20 text-center text-sm font-semibold text-[#efe4c8]" style={{ top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 56}px)` }}>Stumble. Keep going!</div>}
+        <button aria-label="Pause" onClick={() => { g.current.manual = true; }} className="absolute z-20 grid h-14 w-14 place-items-center rounded-full border border-[#d4a24c]/40 bg-[#100d0a]/80 shadow-soft" style={{ left: 12, top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 10}px)` }}>
+          <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden><rect x="4" y="3" width="5" height="16" rx="1.5" fill="#d4a24c" /><rect x="13" y="3" width="5" height="16" rx="1.5" fill="#d4a24c" /></svg></button>
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center pb-[max(10px,env(safe-area-inset-bottom))]"><div className="grid w-full grid-cols-5 gap-1.5 px-2" style={{ maxWidth: Math.max(box.w, 320) }}>
-          {MOVES.map(m => <div key={m} className={`flex flex-col items-center rounded-2xl px-1 py-2 text-center text-[11px] leading-tight shadow-soft ${ui.on[m] ? "bg-teal text-ivory" : "bg-paper/90 text-navy"}`}><span className="text-2xl" aria-hidden>{INFO[m].icon}</span><span className="mt-0.5 whitespace-pre-line">{SHORT[m]}</span>
-            <span className="mt-1 h-1.5 w-full rounded-full bg-navy/15"><span className="block h-1.5 rounded-full bg-gold" style={{ width: `${Math.round(ui.lev[m] * 100)}%` }} /></span></div>)}</div></div>
+          {MOVES.map(m => <div key={m} className={`flex flex-col items-center rounded-2xl border px-1 py-2 text-center text-[11px] leading-tight shadow-soft ${ui.on[m] ? "border-[#e9c26a] bg-[#d4a24c] text-[#1a140c]" : "border-[#d4a24c]/30 bg-[#100d0a]/80 text-[#d8c9a4]"}`}><Rune m={m} size={30} on={ui.on[m]} /><span className="mt-0.5 whitespace-pre-line">{SHORT[m]}</span>
+            <span className="mt-1 h-1.5 w-full rounded-full bg-black/30"><span className="block h-1.5 rounded-full bg-[#fff1c2]" style={{ width: `${Math.round(ui.lev[m] * 100)}%` }} /></span></div>)}</div></div>
         {ui.stage === "ready" && !ui.paused && !ui.adjust && <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-navy/85 px-6 text-center text-ivory" role="status">
           <h2 className="font-display text-4xl">Get ready</h2>
-          <ul className="mt-4 grid w-full max-w-xs gap-2 text-left">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded-2xl bg-ivory/10 px-3 py-2"><span className="text-3xl" aria-hidden>{INFO[m].icon}</span><span className="text-lg">{INFO[m].action}</span></li>)}</ul>
+          <ul className="mt-4 grid w-full max-w-xs gap-2 text-left">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded-2xl bg-ivory/10 px-3 py-2"><Rune m={m} size={34} /><span className="text-lg">{INFO[m].action}</span></li>)}</ul>
           <p className="mt-5 font-display text-3xl">Starting in {ui.ready}</p>
-          <button className="btn-primary mt-4 bg-ivory !text-navy" onClick={() => { g.current.readyLeft = 0; }}>I’m ready, start now</button></div>}
+          <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-4" onClick={() => { g.current.readyLeft = 0; }}>I’m ready, start now</button></div>}
         {ui.adjust && !ui.paused && <div className="absolute inset-0 z-40 grid place-items-center bg-navy/70 p-8 text-center text-ivory" role="alert"><div><p className="font-display text-3xl">Let’s adjust your camera</p>
           <p className="mt-3 text-base">We can’t see your face clearly. Center it and add light. The game waits, and nothing is counted against you.</p></div></div>}
         {ui.paused && <div className="absolute inset-0 z-50 grid place-items-center bg-navy/75 p-6 text-ivory" role="dialog" aria-label="Paused"><div className="w-full max-w-xs text-center">
           <p className="font-display text-3xl">Paused</p><p className="mt-1 text-sm text-ivory/75">Take as long as you need.</p>
-          <button className="btn-primary mt-5 w-full bg-ivory !text-navy" onClick={() => { g.current.manual = false; }}>Resume</button>
+          <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-5 w-full" onClick={() => { g.current.manual = false; }}>Resume</button>
           <div className="mt-4 rounded-2xl bg-ivory/10 p-3 text-sm"><p>Sensitivity {Math.max(1, GAINS.indexOf(gainUi) + 1)} of 5</p><p className="text-xs text-ivory/70">Movements not registering? Try Easier.</p>
-            <div className="mt-2 grid grid-cols-2 gap-2"><button className="btn-quiet min-h-[48px]" onClick={() => { const v = GAINS[Math.min(4, Math.max(0, GAINS.indexOf(gainUi)) + 1)]; liveGain.current = v; setGainUi(v); }}>Easier</button>
-              <button className="btn-quiet min-h-[48px]" onClick={() => { const v = GAINS[Math.max(0, Math.max(0, GAINS.indexOf(gainUi)) - 1)]; liveGain.current = v; setGainUi(v); }}>Harder</button></div></div>
-          <button className="btn-quiet mt-3 w-full" onClick={() => setPreview(p => !p)}>{preview ? "Hide camera preview" : "Show camera preview"}</button>
-          <button className="btn-quiet mt-3 w-full" onClick={() => finish(false)}>End run</button></div></div>}
+            <div className="mt-2 grid grid-cols-2 gap-2"><button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] min-h-[48px]" onClick={() => { const v = GAINS[Math.min(4, Math.max(0, GAINS.indexOf(gainUi)) + 1)]; liveGain.current = v; setGainUi(v); }}>Easier</button>
+              <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] min-h-[48px]" onClick={() => { const v = GAINS[Math.max(0, Math.max(0, GAINS.indexOf(gainUi)) - 1)]; liveGain.current = v; setGainUi(v); }}>Harder</button></div></div>
+          <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => setPreview(p => !p)}>{preview ? "Hide camera preview" : "Show camera preview"}</button>
+          <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => finish(false)}>End run</button></div></div>}
       </div>);
 
     // hub
     return (
       <Page>
-        <a href="/dashboard" className="text-sm text-navy/60">← Home</a>
-        <svg viewBox="0 0 240 130" className="mt-4 w-full rounded-3xl shadow-soft" aria-hidden><rect width="240" height="130" fill="#8fd3f4" /><polygon points="90,40 150,40 215,130 25,130" fill="#657384" /><line x1="110" y1="40" x2="95" y2="130" stroke="#fff" strokeOpacity=".6" strokeWidth="2" /><line x1="130" y1="40" x2="145" y2="130" stroke="#fff" strokeOpacity=".6" strokeWidth="2" />
-          <rect x="108" y="78" width="24" height="12" fill="#f2994a" stroke="#2b3340" strokeWidth="2" /><circle cx="120" cy="104" r="9" fill="#f2c9a0" stroke="#2b3340" strokeWidth="2" /><rect x="111" y="112" width="18" height="16" rx="4" fill="#4E8A86" stroke="#2b3340" strokeWidth="2" /></svg>
+        <a href="/dashboard" className="text-sm text-[#a89a7a]">← Home</a>
+        <svg viewBox="0 0 240 130" className="mt-4 w-full rounded-3xl shadow-soft" aria-hidden><defs><linearGradient id="hs" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#0a1b22" /><stop offset=".6" stopColor="#285043" /><stop offset="1" stopColor="#e3a25a" /></linearGradient></defs><rect width="240" height="130" fill="url(#hs)" /><circle cx="150" cy="70" r="22" fill="#ffe2a0" opacity=".9" />
+          <path d="M0 80Q40 55 80 72T160 66T240 76V130H0Z" fill="#1c382f" /><g fill="#0f1d19"><rect x="82" y="52" width="76" height="9" /><rect x="94" y="43" width="52" height="9" /><rect x="105" y="34" width="30" height="9" /><rect x="114" y="25" width="12" height="9" /></g><rect x="118" y="28" width="4" height="6" fill="#ffc46e" />
+          <polygon points="108,82 132,82 205,130 35,130" fill="#6f6250" /><line x1="116" y1="82" x2="95" y2="130" stroke="#000" strokeOpacity=".3" /><line x1="124" y1="82" x2="145" y2="130" stroke="#000" strokeOpacity=".3" />
+          <ellipse cx="120" cy="116" rx="11" ry="13" fill="#d4672a" stroke="#20120a" strokeWidth="1.5" /><circle cx="120" cy="100" r="8" fill="#e07a32" stroke="#20120a" strokeWidth="1.5" /><path d="M113 96l-2-11 8 6zM127 96l2-11-8 6z" fill="#d4672a" stroke="#20120a" strokeWidth="1.2" /><path d="M126 118q16-2 14-18q-8 10-16 8z" fill="#e0813a" stroke="#20120a" strokeWidth="1.2" /></svg>
         <h1 className="mt-5 font-display text-4xl">Mirror Dash</h1>
-        <p className="mt-2 text-navy/70">A fast three-lane runner for when you’re ready for a challenge. Smile to jump, raise your eyebrows to fly, frown to duck, and pucker left or right to switch lanes.</p>
-        {msg && <p role="alert" className="mt-3 rounded-2xl bg-lav/40 p-3 text-sm">{msg}</p>}
-        <button className="btn-primary mt-5 min-h-[64px] w-full text-xl" onClick={onPlay}>Play game</button>
-        {!hasCal && <p className="mt-2 text-center text-xs text-navy/60">First time? We’ll set up your camera next.</p>}
-        <div className="mt-3 grid grid-cols-2 gap-3"><button className="btn-quiet min-h-[56px]" onClick={openStats}>Stats</button><button className="btn-quiet min-h-[56px]" onClick={() => setView("settings")}>Settings</button></div>
-        {ios && <p className="mt-6 rounded-2xl bg-lav/30 p-4 text-xs text-navy/70">For the full-screen version on iPhone: tap the Share button in Safari, choose <b>Add to Home Screen</b>, then open SmileQuest from your home screen.</p>}
+        <p className="mt-2 text-[#bfb08c]">A fast three-lane runner for when you’re ready for a challenge. Smile to jump, raise your eyebrows to fly, frown to duck, and pucker left or right to switch lanes.</p>
+        {msg && <p role="alert" className="mt-3 rounded-2xl bg-[#3a2f4a] p-3 text-sm">{msg}</p>}
+        <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-5 min-h-[64px] w-full text-xl" onClick={onPlay}>Play game</button>
+        {!hasCal && <p className="mt-2 text-center text-xs text-[#a89a7a]">First time? We’ll set up your camera next.</p>}
+        <div className="mt-3 grid grid-cols-2 gap-3"><button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] min-h-[56px]" onClick={openStats}>Stats</button><button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] min-h-[56px]" onClick={() => setView("settings")}>Settings</button></div>
+        {ios && <p className="mt-6 rounded-2xl bg-[#3a2f4a]/60 p-4 text-xs text-[#bfb08c]">For the full-screen version on iPhone: tap the Share button in Safari, choose <b>Add to Home Screen</b>, then open SmileQuest from your home screen.</p>}
       </Page>);
   };
   return <>{videoEl}{body()}</>;
