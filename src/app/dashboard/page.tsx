@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { PATIENT_TEST_MODE } from "@/lib/config";
 import { GAME_NAMES, exerciseReady, loadContext, moveLabel, type Plan, type Sess } from "@/lib/workflow";
 
 type Row = { id: string; mode: string; status: string; started_at: string; game: string | null; duration_seconds: number | null };
-export default function Dashboard() {
+function FullDashboard() {
   const [ok, setOk] = useState(false), [plan, setPlan] = useState<Plan | null>(null), [sess, setSess] = useState<Sess | null>(null);
   const [recent, setRecent] = useState<Row[]>([]), [week, setWeek] = useState(0);
   useEffect(() => { (async () => {
@@ -44,3 +45,24 @@ export default function Dashboard() {
         {[["Home", "/dashboard"], ["Plan", "/plan"], ["History", "/history"], ["Camera", "/calibrate"]].map(([l, h]) => <li key={l}><a href={h} className="flex min-h-[56px] min-w-[72px] items-center justify-center text-sm text-navy/80">{l}</a></li>)}</ul></nav>
     </main>);
 }
+
+function TestHome() {
+  const [ok, setOk] = useState(false);
+  useEffect(() => { (async () => {
+    const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) { location.href = "/"; return; }
+    const { data: p } = await sb.from("profiles").select("onboarding_completed_at").maybeSingle();
+    if (!p?.onboarding_completed_at) { location.href = "/onboarding"; return; }
+    setOk(true);
+  })(); }, []);
+  async function logout() { await supabase().auth.signOut(); location.href = "/"; }
+  if (!ok) return <main className="grid min-h-dvh place-items-center text-navy/60">Loading…</main>;
+  return (
+    <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))] text-center">
+      <svg viewBox="0 0 240 130" className="w-full rounded-3xl shadow-soft" aria-hidden><rect width="240" height="130" fill="#62c3ee" /><rect x="170" y="0" width="30" height="44" fill="#79c08c" stroke="#35604a" strokeWidth="3" /><rect x="170" y="88" width="30" height="42" fill="#79c08c" stroke="#35604a" strokeWidth="3" />
+        <ellipse cx="80" cy="66" rx="26" ry="23" fill="#6bb3a8" stroke="#2b3340" strokeWidth="3" /><circle cx="90" cy="59" r="6" fill="#fff" stroke="#2b3340" strokeWidth="2" /><circle cx="92" cy="59" r="3" fill="#2b3340" /><path d="M104 66 L120 71 L104 76Z" fill="#f29e4c" stroke="#2b3340" strokeWidth="2" /><circle cx="185" cy="66" r="9" fill="#f6c945" stroke="#a67c12" strokeWidth="2" /></svg>
+      <a href="/flyer" className="btn-primary mt-8 inline-flex min-h-[72px] w-full items-center justify-center text-2xl">Play Mirror Flight</a>
+      <button className="mt-8 text-sm text-navy/60 underline" onClick={logout}>Log out</button>
+    </main>);
+}
+
+export default function Dashboard() { return PATIENT_TEST_MODE ? <TestHome /> : <FullDashboard />; }
