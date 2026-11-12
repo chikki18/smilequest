@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
-import { createTracker, type Frame } from "@/lib/tracking";
+import { createTracker, type Frame, type Vals } from "@/lib/tracking";
 import { POLICY_VERSION } from "@/lib/onboarding";
 
 type Move = { threshold: number; range: number; detectable: boolean; nm: number };
@@ -128,13 +128,13 @@ function drawWorld(c: CanvasRenderingContext2D, s: G, now: number, body: string,
   outlined(c, s.active ? "Holding it. Nice." : "Hold past the white line", W / 2, my + 46, 14, 4);
 }
 
-function FaceArt({ k, size }: { k: K; size: number }) {
+function FaceArt({ k, size }: { k: K | "rest"; size: number }) {
   const ink = "#2b3340", up = k === "brow";
-  const hl = k === "smile" ? { cx: 60, cy: 90, rx: 38, ry: 22 } : k === "pucker" ? { cx: 60, cy: 88, rx: 22, ry: 24 } : k === "brow" ? { cx: 60, cy: 32, rx: 46, ry: 17 } : { cx: 60, cy: 60, rx: 48, ry: 17 };
+  const hl = k === "rest" ? null : k === "smile" ? { cx: 60, cy: 90, rx: 38, ry: 22 } : k === "pucker" ? { cx: 60, cy: 88, rx: 22, ry: 24 } : k === "brow" ? { cx: 60, cy: 32, rx: 46, ry: 17 } : { cx: 60, cy: 60, rx: 48, ry: 17 };
   return (
-    <svg viewBox="0 0 120 120" width={size} height={size} role="img" aria-label={`${EXPR[k].name}: example face`}>
+    <svg viewBox="0 0 120 120" width={size} height={size} role="img" aria-label={`${k === "rest" ? "Relaxed face" : EXPR[k].name}: example face`}>
       <circle cx="60" cy="60" r="54" fill="#ffe1b5" stroke={ink} strokeWidth="4" />
-      <ellipse cx={hl.cx} cy={hl.cy} rx={hl.rx} ry={hl.ry} fill="none" stroke="#4E8A86" strokeWidth="3.5" strokeDasharray="6 5" />
+      {hl && <ellipse cx={hl.cx} cy={hl.cy} rx={hl.rx} ry={hl.ry} fill="none" stroke="#4E8A86" strokeWidth="3.5" strokeDasharray="6 5" />}
       <path d={up ? "M24 38 Q38 20 54 34" : "M26 46 Q40 40 54 46"} fill="none" stroke={ink} strokeWidth="5" strokeLinecap="round" />
       <path d={up ? "M66 34 Q82 20 96 38" : "M66 46 Q80 40 94 46"} fill="none" stroke={ink} strokeWidth="5" strokeLinecap="round" />
       {k === "close" ? <><path d="M28 60 Q40 70 52 60" fill="none" stroke={ink} strokeWidth="5" strokeLinecap="round" /><path d="M68 60 Q80 70 92 60" fill="none" stroke={ink} strokeWidth="5" strokeLinecap="round" /></>
@@ -148,6 +148,12 @@ function FaceArt({ k, size }: { k: K; size: number }) {
 
 type GameRow = { id: string; played_at: string; mode: string; duration_seconds: number; points: number; accuracy: number | null; coins: number; misses: number; best_streak: number; gates: number; completed: boolean; per_expression: { k: K; accuracy: number; seconds: number }[] };
 type Result = { points: number; accuracy: number; coins: number; misses: number; bestStreak: number; gates: number; seconds: number; completed: boolean; per: { k: K; accuracy: number; gates: number; coins: number; misses: number; seconds: number }[]; unlocked: string[]; saved: boolean };
+type CalMove = { peak: number; range: number; threshold: number; detectable: boolean; sideDelta: number[] | null };
+const CAL_KEYS = ["smile", "brow", "pucker", "close", "liftL", "liftR", "browL", "browR", "closeL", "closeR"] as (keyof Vals)[];
+const CAL_MIN: Record<K, number> = { smile: .015, brow: .015, pucker: .08, close: .08 };
+const CAL_SIDES: Record<K, (keyof Vals)[] | null> = { smile: ["liftL", "liftR"], brow: ["browL", "browR"], pucker: null, close: ["closeL", "closeR"] };
+const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
+const sd = (a: number[]) => { const m = mean(a); return Math.sqrt(mean(a.map(x => (x - m) ** 2))); };
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 const TOTAL_NOTE = (n: number, secs: number) => { const t = n * secs; return `${n} expression${n === 1 ? "" : "s"} × ${secs} s = about ${Math.floor(t / 60)} min${t % 60 ? ` ${t % 60} s` : ""}`; };
@@ -189,7 +195,7 @@ export default function Flight() {
   const stream = useRef<MediaStream | null>(null), tracker = useRef<Awaited<ReturnType<typeof createTracker>> | null>(null);
   const latest = useRef<Frame | null>(null), g = useRef<G>(fresh(["smile"], 640));
   const cfg = useRef({ secs: 20, gap: 290, pace: 75, auto: true }), liveGain = useRef(1.7);
-  const [view, setView] = useState<"loading" | "hub" | "clearance" | "ready" | "settings" | "stats" | "custom" | "play" | "results">("loading");
+  const [view, setView] = useState<"loading" | "hub" | "clearance" | "ready" | "settings" | "calibrate" | "stats" | "custom" | "play" | "results">("loading");
   const [cal, setCal] = useState<Partial<Record<K, Move>>>({});
   const [clear, setClear] = useState(false), [agree, setAgree] = useState(false);
   const [prof, setProf] = useState<Prof>({ total: 0, kind: "bird", color: "", acc: "" });
@@ -201,7 +207,13 @@ export default function Flight() {
   const calRef = useRef(cal); calRef.current = cal;
   const P = useRef(prof); P.current = prof;
   const hasCal = Object.keys(cal).length > 0;
-  const CAL_URL = "/calibrate?next=" + encodeURIComponent("/flyer?ready=1");
+  const [calFrom, setCalFrom] = useState<"play" | "settings">("play");
+  const [calStep, setCalStep] = useState(0), [calCam, setCalCam] = useState<"off" | "loading" | "on">("off");
+  const [calStatus, setCalStatus] = useState<string | null>(null), [calBusy, setCalBusy] = useState(false), [calMsg, setCalMsg] = useState<string | null>(null);
+  const [calNeutral, setCalNeutral] = useState<Record<string, { mean: number; std: number }> | null>(null);
+  const [calMoves, setCalMoves] = useState<Partial<Record<K, CalMove>>>({});
+  const [calQ, setCalQ] = useState<{ face: boolean; size: boolean; light: boolean } | null>(null), [calSaving, setCalSaving] = useState(false);
+  const calCv = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => { (async () => {
     const sb = supabase(); const { data: { user } } = await sb.auth.getUser();
@@ -219,6 +231,59 @@ export default function Flight() {
   })(); return () => stop(); }, []);
 
   function stop() { tracker.current?.stop(); tracker.current = null; stream.current?.getTracks().forEach(t => t.stop()); stream.current = null; latest.current = null; }
+  // ---- in-game calibration ----
+  function openCalibrate(from: "play" | "settings") {
+    setCalFrom(from); setCalStep(0); setCalNeutral(null); setCalMoves({}); setCalMsg(null); setCalStatus(null); setCalCam(tracker.current ? "on" : "off"); setMsg(null); setView("calibrate");
+  }
+  function closeCalibrate(saved: boolean) {
+    stop(); setCalCam("off"); setCalStatus(null); setCalBusy(false);
+    if (saved && calFrom === "play") setView("ready"); else setView(calFrom === "play" ? "hub" : "settings");
+  }
+  async function startCal() {
+    setCalCam("loading"); setCalMsg(null);
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+      stream.current = s; s.getVideoTracks()[0].onended = () => { setCalCam("off"); setCalMsg("The camera was interrupted. Tap Start camera to resume."); };
+      const v = video.current!; v.srcObject = s; await v.play();
+      tracker.current = await createTracker(v, f => { latest.current = f; });
+      setCalCam("on");
+    } catch (e: any) { stop(); setCalCam("off"); setCalMsg(e?.name === "NotAllowedError" ? "Camera access is blocked. Allow it in your browser’s site settings (the lock icon by the address), then try again." : `Couldn’t start the camera: ${e?.message ?? e}`); }
+  }
+  async function grab(lead: number, secs: number, leadText: string, recText: string): Promise<Vals[] | null> {
+    setCalBusy(true); setCalMsg(null);
+    const tick = (ms: number, fn: (left: number) => void) => new Promise<void>(res => { const end = Date.now() + ms; const id = setInterval(() => { fn(Math.max(0, Math.ceil((end - Date.now()) / 1000))); if (Date.now() >= end) { clearInterval(id); res(); } }, 50); });
+    await tick(lead * 1000, l => setCalStatus(`${leadText} ${l}`));
+    const s: Vals[] = [];
+    await tick(secs * 1000, l => { setCalStatus(`${recText} ${l}`); const fr = latest.current; if (fr?.vals && fr.q.face && fr.q.size) s.push(fr.vals); });
+    setCalStatus(null); setCalBusy(false);
+    if (s.length < 25) { setCalMsg("Let’s adjust your camera. We couldn’t see your face clearly, so nothing was recorded. Try more light, center your face, and record again."); return null; }
+    return s;
+  }
+  async function doNeutral() {
+    const s = await grab(2, 3, "Relax your face…", "Stay relaxed…"); if (!s) return;
+    const n: Record<string, { mean: number; std: number }> = {};
+    for (const k of CAL_KEYS) { const a = s.map(x => x[k]); n[k] = { mean: mean(a), std: sd(a) }; }
+    setCalNeutral(n); setCalMoves({});
+  }
+  async function doMove(k: K) {
+    if (!calNeutral) return;
+    const s = await grab(2, 4, "Get ready…", "Hold it gently…"); if (!s) return;
+    const top = [...s].sort((a, b) => b[k] - a[k]).slice(0, Math.max(5, Math.floor(s.length / 4)));
+    const nm = calNeutral[k], peak = mean(top.map(x => x[k])), range = peak - nm.mean;
+    const detectable = range > Math.max(3 * nm.std, CAL_MIN[k]), sides = CAL_SIDES[k];
+    const sideDelta = sides ? sides.map(x => mean(top.map(t => t[x])) - calNeutral[x].mean) : null;
+    setCalMoves(m => ({ ...m, [k]: { peak, range, threshold: nm.mean + 0.5 * range, detectable, sideDelta } }));
+  }
+  async function saveCal() {
+    if (!calNeutral) return; setCalSaving(true); setCalMsg(null);
+    const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) { location.href = "/"; return; }
+    const { error } = await sb.from("calibration_profiles").insert({ user_id: user.id, summary: { version: 1, neutral: calNeutral, moves: calMoves, swapLR: false, note: "Camera-derived estimates in face-size-normalised units; not clinical measurements." } });
+    setCalSaving(false);
+    if (error) { setCalMsg(`Couldn’t save: ${error.message}`); return; }
+    const m: Partial<Record<K, Move>> = {};
+    for (const k of KEYS) { const v = calMoves[k]; if (v?.detectable) m[k] = { ...v, nm: v.threshold - 0.5 * v.range }; }
+    setCal(m); closeCalibrate(true);
+  }
   function update(p: Partial<Settings>) { const n = { ...st, ...p }; setSt(n); saveSettings(n); }
   async function bank(earned: number, p: Prof = P.current): Promise<boolean> {
     const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) return false;
@@ -232,7 +297,7 @@ export default function Flight() {
   function onPlay() {
     setMsg(null);
     if (!clear) { setView("clearance"); return; }
-    if (!hasCal) { location.href = CAL_URL; return; }   // first time on this account: calibrate first
+    if (!hasCal) { openCalibrate("play"); return; }   // first time on this account: calibrate first, inside the game
     startGame();
   }
   async function confirmClearance() {
@@ -242,7 +307,7 @@ export default function Flight() {
     setBusy(false);
     if (error) { setMsg(`Couldn’t save your confirmation: ${error.message}. (Run the 0006 database step in Supabase.)`); return; }
     setClear(true);
-    if (!hasCal) location.href = CAL_URL; else setView("ready");
+    if (!hasCal) openCalibrate("play"); else setView("ready");
   }
 
   async function startGame() {
@@ -355,11 +420,25 @@ export default function Flight() {
     drawCritter(c, 120, 82, -.1, prof.kind, prof.color || an.col, prof.acc, 0.6, 2.4);
   }, [view, prof]);
 
+  useEffect(() => {
+    if (view !== "calibrate") return;
+    const cv = calCv.current; if (cv) { cv.width = 320; cv.height = 240; }
+    let raf = 0;
+    const draw = () => {
+      raf = requestAnimationFrame(draw); const c = calCv.current, v = video.current; if (!c || !v || v.readyState < 2 || !stream.current || !v.videoWidth) return;
+      const x = c.getContext("2d")!, sc = Math.max(320 / v.videoWidth, 240 / v.videoHeight), dw = v.videoWidth * sc, dh = v.videoHeight * sc;
+      x.save(); x.translate(320, 0); x.scale(-1, 1); x.drawImage(v, (320 - dw) / 2, (240 - dh) / 2, dw, dh); x.restore();
+    };
+    raf = requestAnimationFrame(draw);
+    const id = setInterval(() => { const fr = latest.current; setCalQ(fr ? { face: fr.q.face, size: fr.q.size, light: fr.q.light } : null); }, 200);
+    return () => { cancelAnimationFrame(raf); clearInterval(id); };
+  }, [view]);
+
   const nextUnlock = UNLOCKS.find(u => u.need > prof.total);
   const ios = typeof navigator !== "undefined" && /iPhone|iPad/.test(navigator.userAgent) && !(navigator as any).standalone;
 
   const videoEl = <video ref={video} playsInline muted aria-label="Your camera preview (mirrored)"
-    className={view === "play" && preview ? "fixed z-40 -scale-x-100 rounded-2xl object-cover shadow-soft" : "pointer-events-none fixed h-px w-px opacity-0"}
+    className={view === "play" && preview ? "fixed z-40 -scale-x-100 rounded-2xl object-cover shadow-soft" : "pointer-events-none fixed left-0 top-0 h-1 w-1 opacity-[0.02]"}
     style={view === "play" && preview ? { right: 12, top: `calc(env(safe-area-inset-top, 0px) + ${BANNER_H + 10}px)`, width: 96, height: 72 } : undefined} />;
 
   const body = () => {
@@ -382,11 +461,58 @@ export default function Flight() {
         <button className="btn-primary mt-8 min-h-[64px] w-full text-xl" disabled={busy} onClick={startGame}>{busy ? "Starting camera…" : "Start flying"}</button>
         <button className="btn-quiet mt-3 w-full" onClick={() => setView("hub")}>Back</button></main>);
 
+    if (view === "calibrate") {
+      const sk: K | "rest" | null = calStep === 1 ? "rest" : calStep >= 2 && calStep <= 5 ? KEYS[calStep - 2] : null;
+      const rec = sk && sk !== "rest" ? calMoves[sk] : undefined;
+      const anyOk = KEYS.some(k => calMoves[k]?.detectable);
+      const chip = (ok: boolean, t: string) => <span className={`rounded-full px-3 py-1 text-xs ${ok ? "bg-sage/40" : "bg-gold/30"}`}>{t}</span>;
+      const canNext = calStep === 0 ? calCam === "on" : calStep === 1 ? !!calNeutral : true;
+      const title = calStep === 0 ? "Set up your camera" : calStep === 1 ? "Relaxed face" : calStep === 6 ? "All set?" : EXPR[sk as K].name;
+      return (
+        <Page>
+          <div className="flex gap-1.5" role="progressbar" aria-valuemin={1} aria-valuemax={7} aria-valuenow={calStep + 1} aria-label={`Step ${calStep + 1} of 7`}>{Array.from({ length: 7 }, (_, n) => <div key={n} className={`h-1.5 flex-1 rounded-full ${n <= calStep ? "bg-teal" : "bg-mist"}`} />)}</div>
+          <h1 className="mt-5 font-display text-3xl">{title}</h1>
+          {calStep <= 5 && <>
+            <canvas ref={calCv} className="mt-4 w-full rounded-3xl bg-navy/90 shadow-soft" style={{ aspectRatio: "4 / 3" }} aria-label="Your camera preview (mirrored)" />
+            <div className="mt-3 flex flex-wrap gap-2" aria-live="polite">{chip(!!calQ?.face, calQ?.face ? "Face visible" : "No face yet")}{chip(!!calQ?.size, "Distance")}{chip(!!calQ?.light, "Lighting")}</div></>}
+          {calStatus && <p role="status" className="mt-3 rounded-2xl bg-teal/15 p-4 text-center font-display text-2xl">{calStatus}</p>}
+          {calMsg && <p role="alert" className="mt-3 rounded-2xl bg-lav/40 p-3 text-sm">{calMsg}</p>}
+
+          {calStep === 0 && <section className="mt-4"><p className="text-navy/70">Your camera is processed on this device. Video is never uploaded or saved. We’ll record your relaxed face, then each movement once. Go gently and skip any you don’t want to do.</p>
+            <button className="btn-primary mt-4 min-h-[60px] w-full text-lg" disabled={calCam !== "off"} onClick={startCal}>{calCam === "loading" ? "Starting camera…" : calCam === "on" ? "Camera is on ✓" : "Start camera"}</button></section>}
+
+          {calStep === 1 && <section className="mt-4 flex flex-col items-center text-center"><FaceArt k="rest" size={130} />
+            <p className="mt-3 text-lg">Look at the camera with a comfortable, relaxed face.</p>
+            <button className="btn-primary mt-4 min-h-[60px] w-full text-lg" disabled={calBusy || calCam !== "on"} onClick={doNeutral}>{calNeutral ? "Record again" : "Record relaxed face (3 seconds)"}</button>
+            {calNeutral && !calBusy && <p className="mt-3 text-sm text-navy/70">Got it. Your relaxed face is recorded.</p>}</section>}
+
+          {calStep >= 2 && calStep <= 5 && sk && sk !== "rest" && <section className="mt-4 flex flex-col items-center text-center"><FaceArt k={sk} size={130} />
+            <p className="mt-3 text-xl">{EXPR[sk].cue}</p><p className="mt-1 text-sm text-navy/70">{EXPR[sk].tip}</p>
+            <button className="btn-primary mt-4 min-h-[60px] w-full text-lg" disabled={calBusy || calCam !== "on"} onClick={() => doMove(sk)}>{rec ? "Record again" : "Record (4 seconds)"}</button>
+            {rec && !calBusy && <p className="mt-3 text-sm text-navy/70">{rec.detectable ? "Great. We picked up a clear movement." : "We couldn’t pick up a clear change this time. That’s okay. Try again a little more, or skip it."}</p>}</section>}
+
+          {calStep === 6 && <section className="mt-4"><ul className="grid gap-2">{KEYS.map(k => { const m = calMoves[k]; return (
+            <li key={k} className="flex items-center gap-3 rounded-2xl bg-paper p-3 shadow-soft"><FaceArt k={k} size={44} /><span className="flex-1">{EXPR[k].name}</span><span className="text-sm text-navy/70">{m?.detectable ? "Ready ✓" : m ? "Not detected" : "Skipped"}</span></li>); })}</ul>
+            <p className="mt-3 text-xs text-navy/60">The game only uses the movements marked Ready. You can recalibrate any time from Settings.</p>
+            <button className="btn-primary mt-4 min-h-[60px] w-full text-lg" disabled={!anyOk || calSaving} onClick={saveCal}>{calSaving ? "Saving…" : "Save calibration"}</button>
+            {!anyOk && <p className="mt-2 text-sm text-navy/70">Record at least one movement to continue.</p>}</section>}
+
+          <div className="mt-6 flex gap-3">
+            <button className="btn-quiet" disabled={calBusy || calSaving} onClick={() => (calStep === 0 ? closeCalibrate(false) : setCalStep(calStep - 1))}>{calStep === 0 ? "Cancel" : "Back"}</button>
+            {calStep < 6 && <button className="btn-primary flex-1" disabled={calBusy || !canNext} onClick={() => setCalStep(calStep + 1)}>{calStep >= 2 && !rec ? "Skip this one" : "Next"}</button>}
+          </div>
+        </Page>);
+    }
+
     if (view === "settings") {
       const n = st.auto ? AUTO : st;
       return (
         <Page><h1 className="font-display text-3xl">Settings</h1>
-          <label className="mt-5 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>Automatic settings</b><br /><span className="text-sm text-navy/60">Recommended. Picks everything for you.</span></span>
+          <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">1. Calibrate</h2>
+            <p className="mt-1 text-sm text-navy/70">{hasCal ? `Ready: ${KEYS.filter(k => cal[k]).map(k => EXPR[k].name).join(", ")}.` : "Not set up yet. Calibrating teaches the game your own comfortable movements."}</p>
+            <button className="btn-primary mt-3 w-full" onClick={() => openCalibrate("settings")}>{hasCal ? "Recalibrate" : "Calibrate"}</button></section>
+          <h2 className="mt-6 font-display text-xl">2. Game settings</h2>
+          <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>Automatic settings</b><br /><span className="text-sm text-navy/60">Recommended. Picks everything for you.</span></span>
             <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.auto} onChange={e => update({ auto: e.target.checked })} aria-label="Automatic settings" /></label>
           {st.auto ? <div className="mt-4 rounded-3xl bg-sage/30 p-5 text-sm"><p>All four expressions, in order: gentle smile, eyebrow raise, lip pucker, gentle eye closure.</p>
             <p className="mt-2">20 seconds each. Before each one you get a big picture and a few seconds to get ready.</p><p className="mt-2">{TOTAL_NOTE(KEYS.filter(k => cal[k]).length || 4, 20)}, plus short get-ready breaks.</p></div>
@@ -399,7 +525,6 @@ export default function Flight() {
             <label className="text-sm">Sensitivity<select className="field mt-1" value={n.gain} onChange={e => update({ gain: +e.target.value })}>{GAINS.map((v, i) => <option key={v} value={v}>{i + 1} of 5{i === 2 ? " (recommended)" : i === 0 ? " (your exact target)" : i === 4 ? " (tiny movements count)" : ""}</option>)}</select></label>
             <label className="text-sm">Gap size<select className="field mt-1" value={n.gap} onChange={e => update({ gap: +e.target.value })}><option value={250}>Wide</option><option value={290}>Extra wide (recommended)</option><option value={330}>Huge</option></select></label>
             <label className="text-sm">Pace<select className="field mt-1" value={n.pace} onChange={e => update({ pace: +e.target.value })}><option value={60}>Very slow</option><option value={75}>Slow (recommended)</option><option value={100}>Normal</option></select></label></div>}
-          <a href={CAL_URL} className="btn-quiet mt-6 inline-flex w-full items-center justify-center">Recalibrate camera</a>
           <button className="btn-primary mt-3 w-full" onClick={() => setView("hub")}>Done</button></Page>);
     }
 
@@ -503,6 +628,7 @@ export default function Flight() {
         <p className="mt-2 text-navy/70">Make the expression shown on screen and your bird flies through the gaps.</p>
         {msg && <p role="alert" className="mt-3 rounded-2xl bg-lav/40 p-3 text-sm">{msg}</p>}
         <button className="btn-primary mt-5 min-h-[64px] w-full text-xl" onClick={onPlay}>Play game</button>
+        {!hasCal && <p className="mt-2 text-center text-xs text-navy/60">First time? We’ll set up your camera next.</p>}
         <div className="mt-3 grid grid-cols-2 gap-3"><button className="btn-quiet min-h-[56px]" onClick={openStats}>Stats</button><button className="btn-quiet min-h-[56px]" onClick={() => setView("custom")}>Customize</button></div>
         <button className="btn-quiet mt-3 w-full" onClick={() => setView("settings")}>Settings · {st.auto ? "Automatic" : "Custom"}</button>
         {ios && <p className="mt-6 rounded-2xl bg-lav/30 p-4 text-xs text-navy/70">For the full-screen version on iPhone: tap the Share button in Safari, choose <b>Add to Home Screen</b>, then open SmileQuest from your home screen.</p>}
