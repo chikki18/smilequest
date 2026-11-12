@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { createTracker, type Frame, type Vals } from "@/lib/tracking";
 import { POLICY_VERSION } from "@/lib/onboarding";
+import { loadContext, endSession, moveLabel } from "@/lib/workflow";
 
 type Move = { threshold: number; range: number; detectable: boolean };
 const SPELLS: Record<string, { name: string; label: string; icon: string }> = {
@@ -55,15 +56,19 @@ export default function Play() {
   const [sens, setSens] = useState(0.35);
   const [ui, setUi] = useState({ charge: 0, adjust: false, paused: false, complete: false, cur: 0, sig: 0 });
   const [result, setResult] = useState({ holds: 0, longest: 0, time: 0, pauses: 0 });
+  const sessId = useRef<string | null>(null);
   const R = useRef({ moves, sel, holdSec, sens }); R.current = { moves, sel, holdSec, sens };
 
   useEffect(() => { (async () => {
     const { data: { user } } = await supabase().auth.getUser();
     if (!user) { setMsg("Please log in on the home page first."); setPhase("nocal"); return; }
+    const ctx = await loadContext(); if (!ctx.session) { location.href = "/session"; return; }
+    sessId.current = ctx.session.id;
+    if (ctx.plan?.hold_seconds) setHoldSec(ctx.plan.hold_seconds);
     const { data } = await supabase().from("calibration_profiles").select("summary").order("created_at", { ascending: false }).limit(1).maybeSingle();
     const m: Record<string, Move> = {};
-    for (const [k, v] of Object.entries((data?.summary?.moves ?? {}) as Record<string, Move>)) if (v.detectable && SPELLS[k]) m[k] = v;
-    if (!Object.keys(m).length) { setPhase("nocal"); return; }
+    for (const [k, v] of Object.entries((data?.summary?.moves ?? {}) as Record<string, Move>)) if (v.detectable && SPELLS[k] && (!ctx.allowed || ctx.allowed.includes(k))) m[k] = v;
+    if (!Object.keys(m).length) { setMsg("None of your approved movements are calibrated yet. Set up your camera for them first."); setPhase("nocal"); return; }
     setMoves(m); setSel(Object.keys(m)[0]); setPhase("pick");
   })(); return () => stop(); }, []);
 
@@ -91,6 +96,7 @@ export default function Play() {
   function finish() {
     const s = g.current; if (s.aboveSince != null && s.complete) s.holds = Math.max(s.holds, 1);
     setResult({ holds: s.holds, longest: s.longest, time: s.time, pauses: s.pauses }); stop(); setPhase("done");
+    if (sessId.current) endSession(sessId.current, "spellbook", s.time, { holds: s.holds, longest: Math.round(s.longest * 10) / 10, rests: 0, tracking_adjustments: s.pauses, movements: [moveLabel(R.current.sel)], completed: s.complete });
   }
 
   useEffect(() => {
@@ -148,8 +154,8 @@ export default function Play() {
       <ul className="mt-6 grid gap-2 rounded-3xl bg-paper p-5 text-sm shadow-soft">
         <li>Game: The Forgotten Lantern ({sp.name})</li><li>Time playing: {Math.round(result.time)} s</li>
         <li>Longest comfortable hold: {result.longest.toFixed(1)} s</li><li>Camera adjustments needed: {result.pauses}</li></ul>
-      <p className="mt-3 text-xs text-navy/50">Camera-derived estimates of game engagement, not a clinical measure. This session isn’t saved yet; session saving comes with the next milestone.</p>
-      <button className="btn-primary mt-6 w-full" onClick={() => setPhase("pick")}>Play again</button>
+      <p className="mt-3 text-xs text-navy/50">Camera-derived estimates of game engagement, not a clinical measure. Saved to your session history.</p>
+      <a className="btn-primary mt-6 inline-flex w-full items-center justify-center" href="/summary">See session summary</a>
       <a className="btn-quiet mt-3 inline-flex w-full items-center justify-center" href="/dashboard">Back to dashboard</a></main>);
   if (phase === "pick") return (
     <main className="mx-auto max-w-md px-6 pb-12 pt-[max(2rem,env(safe-area-inset-top))]">
@@ -161,7 +167,7 @@ export default function Play() {
           className={`min-h-[60px] rounded-2xl border px-4 text-left ${sel === k ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`}>
           {SPELLS[k].icon} <b>{SPELLS[k].name}</b> · {SPELLS[k].label}</button>))}</div>
       <label className="mt-5 block text-sm">Hold length<select className="field mt-1" value={holdSec} onChange={e => setHoldSec(+e.target.value)}>
-        {[2, 3, 5, 8].map(n => <option key={n} value={n}>{n} seconds</option>)}</select></label>
+        {Array.from(new Set([2, 3, 5, 8, holdSec])).sort((a, b) => a - b).map(n => <option key={n} value={n}>{n} seconds</option>)}</select></label>
       <label className="mt-4 block text-sm">Sensitivity<select className="field mt-1" value={sens} onChange={e => setSens(+e.target.value)}>
         <option value={0.25}>Very easy (lights up with a small movement)</option><option value={0.35}>Easy (recommended)</option><option value={0.5}>Standard (your calibrated target)</option></select></label>
       <p className="mt-4 text-xs text-navy/60">Your camera is processed on this device. Video is never uploaded or saved.</p>
