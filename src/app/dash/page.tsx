@@ -48,13 +48,13 @@ type G = {
   stage: "ready" | "play" | "done"; readyLeft: number; t: number; dist: number; lane: number; lanePos: number; cd: number; jumpT: number; crouchT: number; jet: number; fuel: number;
   on: Record<M, boolean>; lev: Record<M, number>; rows: Row[]; coins: Coin[]; spawnZ: number; speed: number; mul: number; invuln: number; coinsGot: number; points: number;
   streak: number; best: number; cleared: number; stumbles: number; top: number; counts: Record<M, number>; clearedBy: Record<string, number>; stumbledBy: Record<string, number>;
-  lostSince: number | null; adjust: boolean; manual: boolean; wh: number; py: number; hint: string; run: number;
+  lostSince: number | null; adjust: boolean; manual: boolean; wh: number; py: number; hint: string; run: number; pend: Record<M, number>;
 };
 const z5 = () => ({ jump: 0, fly: 0, duck: 0, right: 0, left: 0 });
 const fresh = (wh: number): G => ({
   stage: "ready", readyLeft: 6, t: 0, dist: 0, lane: 1, lanePos: 1, cd: 0, jumpT: 0, crouchT: 0, jet: 0, fuel: 1,
   on: { jump: false, fly: false, duck: false, right: false, left: false }, lev: z5(), rows: [], coins: [], spawnZ: 60, speed: 0, mul: 1, invuln: 0, coinsGot: 0, points: 0,
-  streak: 0, best: 0, cleared: 0, stumbles: 0, top: 0, counts: z5(), clearedBy: {}, stumbledBy: {}, lostSince: null, adjust: false, manual: false, wh, py: wh - BOTBAR - 40, hint: "", run: 0,
+  streak: 0, best: 0, cleared: 0, stumbles: 0, top: 0, counts: z5(), clearedBy: {}, stumbledBy: {}, lostSince: null, adjust: false, manual: false, wh, py: wh - BOTBAR - 40, hint: "", run: 0, pend: z5(),
 });
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 function spawnRow(s: G, len: number) {
@@ -180,7 +180,7 @@ function drawWorld(c: CanvasRenderingContext2D, s: G, now: number) {
   const crouch = s.crouchT > 0 && lift < 5, bodyH = crouch ? 40 : 66, y0 = PY - lift;
   c.fillStyle = "rgba(0,0,0,.32)"; c.beginPath(); c.ellipse(px, PY + 2, 24 - lift * .07, 7, 0, 0, 7); c.fill();
   if (lift < 5) for (let i = 0; i < 4; i++) { const t = (now / 320 + i * .25) % 1; c.fillStyle = `rgba(214,198,160,${(1 - t) * .35})`; c.beginPath(); c.arc(px + (i - 1.5) * 9, PY - t * 10, 3 + t * 6, 0, 7); c.fill(); }
-  if (!(s.invuln > 0 && Math.floor(now / 90) % 2)) drawFox(c, px, y0, bodyH, lift, s, now);
+  c.globalAlpha = s.invuln > 0 && Math.floor(now / 110) % 2 ? .55 : 1; drawFox(c, px, y0, bodyH, lift, s, now); c.globalAlpha = 1;
   for (const o of objs) if (o.d < 0) o.draw();
   // embers + vignette
   c.fillStyle = "rgba(255,190,100,.55)"; for (let i = 0; i < 16; i++) { const x = (i * 67 + Math.sin(now / 900 + i) * 14 + W) % W, y = wh - ((now * .02 * (1 + i % 3) + i * 61) % (wh - HZ)); c.beginPath(); c.arc(x, y, 1 + (i % 3) * .5, 0, 7); c.fill(); }
@@ -204,6 +204,7 @@ function Face({ m, size = 140 }: { m: M | "rest"; size?: number }) {
       {m === "jump" ? <path d="M33 68q17 14 34 0" /> : m === "duck" ? <path d="M35 76q15-12 30 0" /> : m === "right" || m === "left" ? <circle cx={50 + sx * 2} cy="70" r="6" /> : m === "fly" ? <path d="M40 70h20" /> : <path d="M38 70h24" strokeOpacity=".7" />}
     </svg>);
 }
+function Rule() { return <div className="my-3 flex items-center gap-2" aria-hidden><span className="h-px flex-1 bg-gradient-to-r from-transparent to-[#d4a24c]/60" /><span className="h-1.5 w-1.5 rotate-45 bg-[#d4a24c]" /><span className="h-px flex-1 bg-gradient-to-l from-transparent to-[#d4a24c]/60" /></div>; }
 function Coin({ size = 24 }: { size?: number }) { return <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden><circle cx="12" cy="12" r="10" fill="#d9a02c" stroke="#6e4a0c" strokeWidth="1.5" /><circle cx="12" cy="12" r="6" fill="none" stroke="#ffe08a" strokeWidth="1.5" /></svg>; }
 
 type Prof = { total: number };
@@ -231,7 +232,7 @@ export default function Dash() {
   const [calNeutral, setCalNeutral] = useState<Record<SK, { mean: number; std: number }> | null>(null);
   const [calMoves, setCalMoves] = useState<Partial<Record<M, Move>>>({}), [calSaving, setCalSaving] = useState(false);
   const [calQ, setCalQ] = useState<{ face: boolean; size: boolean; light: boolean } | null>(null);
-  const hasCal = !!cal;
+  const hasCal = !!cal; const hubCv = useRef<HTMLCanvasElement>(null); const [hubBox, setHubBox] = useState({ w: 360, h: 640 });
 
   useEffect(() => { (async () => {
     const sb = supabase(); const { data: { user } } = await sb.auth.getUser();
@@ -364,10 +365,11 @@ export default function Dash() {
       s.mul += (1 - s.mul) * Math.min(1, dt * .7);
       const base = start * (1 + (ramp - 1) * prog), v = base * s.mul; s.speed = v; s.top = Math.max(s.top, base); s.dist += v * dt;
       s.cd -= dt; s.invuln = Math.max(0, s.invuln - dt);
-      if (s.cd <= 0 && edge.right && s.lane < 2) { s.lane++; s.cd = .22; s.counts.right++; }
-      else if (s.cd <= 0 && edge.left && s.lane > 0) { s.lane--; s.cd = .22; s.counts.left++; }
-      if (edge.jump && s.jumpT <= 0 && s.jet < .3) { s.jumpT = .7; s.counts.jump++; }
-      if (edge.duck && s.jumpT <= 0 && s.jet < .3) { s.crouchT = .55; s.counts.duck++; }
+      for (const m of MOVES) s.pend[m] = edge[m] ? .35 : Math.max(0, s.pend[m] - dt);
+      if (s.cd <= 0 && s.pend.right > 0 && s.lane < 2) { s.lane++; s.cd = .2; s.counts.right++; s.pend.right = 0; }
+      else if (s.cd <= 0 && s.pend.left > 0 && s.lane > 0) { s.lane--; s.cd = .2; s.counts.left++; s.pend.left = 0; }
+      if (s.pend.jump > 0 && s.jet < .3) { s.crouchT = 0; if (s.jumpT <= 0) { s.jumpT = .7; s.counts.jump++; s.pend.jump = 0; } }
+      if (s.pend.duck > 0 && s.jet < .3) { s.jumpT = 0; s.crouchT = .55; s.counts.duck++; s.pend.duck = 0; }
       else if (s.on.duck && s.crouchT > 0) s.crouchT = Math.max(s.crouchT, .15);
       s.crouchT = Math.max(0, s.crouchT - dt); s.jumpT = Math.max(0, s.jumpT - dt);
       if (s.on.fly && s.fuel > 0) { if (edge.fly) s.counts.fly++; s.jet = Math.min(1.1, s.jet + dt * 4); s.fuel -= dt / 2.6; }
@@ -382,7 +384,7 @@ export default function Dash() {
         if (!r.zone && dd < 1.2 && dd > -1.2) r.zone = true;
         if (r.zone && !r.hit && dd > -1 && dd < .9 && s.invuln <= 0 && r.lanes.some(l => Math.abs(s.lanePos - l) < .55)) {
           const hit = r.kind === "hurdle" ? h < .5 : r.kind === "bar" ? !crouch && s.jet < .8 : s.jet < .8;
-          if (hit) { r.hit = true; s.mul = .55; s.invuln = 1.4; s.streak = 0; s.stumbles++; s.stumbledBy[r.kind] = (s.stumbledBy[r.kind] ?? 0) + 1; if (cfg.current.haptics) buzz(90); }
+          if (hit) { r.hit = true; s.mul = .6; s.invuln = 1.8; s.streak = 0; { const gap = base * 1.4; for (const q of s.rows) if (q !== r && q.z - s.dist > 2) q.z += gap; for (const c2 of s.coins) if (c2.z - s.dist > 2) c2.z += gap; s.spawnZ += gap; } s.stumbles++; s.stumbledBy[r.kind] = (s.stumbledBy[r.kind] ?? 0) + 1; if (cfg.current.haptics) buzz(90); }
         }
         if (!r.done && dd < -1.2) { r.done = true; if (!r.hit && r.threat) { s.cleared++; s.points += 10; s.streak++; s.best = Math.max(s.best, s.streak); s.clearedBy[r.kind] = (s.clearedBy[r.kind] ?? 0) + 1; } }
         if (!hint && !r.done && dd > 0 && dd < 45 && r.lanes.includes(s.lane) && !r.hit) {
@@ -406,6 +408,17 @@ export default function Dash() {
   }, [view]);
 
   useEffect(() => {
+    if (view !== "hub") return; const cv = hubCv.current; if (!cv) return;
+    const wh = clamp(Math.round(W * innerHeight / innerWidth), 560, 800), d = Math.min(2, devicePixelRatio || 1); cv.width = W * d; cv.height = wh * d; const ctx = cv.getContext("2d")!; ctx.setTransform(d, 0, 0, d, 0, 0);
+    const fit = () => { const sc = Math.max(innerWidth / W, innerHeight / wh); setHubBox({ w: W * sc, h: wh * sc }); }; fit(); addEventListener("resize", fit);
+    const s = fresh(wh); s.t = 40; let raf = 0, prev = performance.now();
+    const loop = (now: number) => { raf = requestAnimationFrame(loop); const dt = Math.min(.05, (now - prev) / 1000); prev = now; s.dist += dt * 12; s.lanePos = 1 + Math.sin(now / 2200) * .85;
+      while (s.spawnZ < s.dist + 95) spawnRow(s, 90); s.rows = s.rows.filter(r => r.z - s.dist > -8); s.coins = s.coins.filter(c => c.z - s.dist > -8); drawWorld(ctx, s, now); };
+    raf = requestAnimationFrame(loop);
+    return () => { cancelAnimationFrame(raf); removeEventListener("resize", fit); };
+  }, [view]);
+
+  useEffect(() => {
     if (view !== "calibrate") return;
     const cv = calCv.current; if (cv) { cv.width = 320; cv.height = 240; }
     let raf = 0;
@@ -421,31 +434,31 @@ export default function Dash() {
 
   const ios = typeof navigator !== "undefined" && /iPhone|iPad/.test(navigator.userAgent) && !(navigator as any).standalone;
   const videoEl = <video ref={video} playsInline muted aria-label="Your camera preview (mirrored)"
-    className={view === "play" && preview ? "fixed z-40 -scale-x-100 rounded-2xl object-cover shadow-soft" : "pointer-events-none fixed left-0 top-0 h-1 w-1 opacity-[0.02]"}
+    className={view === "play" && preview ? "fixed z-40 -scale-x-100 rounded object-cover shadow-soft" : "pointer-events-none fixed left-0 top-0 h-1 w-1 opacity-[0.02]"}
     style={view === "play" && preview ? { right: 12, top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 8}px)`, width: 84, height: 63 } : undefined} />;
-  const choice = (on: boolean) => `rounded-2xl border ${on ? "border-[#d4a24c] bg-[#d4a24c]/15 shadow-soft" : "border-[#4a4030] bg-[#1c1915]"}`;
+  const choice = (on: boolean) => `rounded border ${on ? "border-[#d4a24c] bg-[#d4a24c]/15 shadow-soft" : "border-[#4a4030] border border-[#d4a24c]/15 bg-[#17130f]/90"}`;
 
   const body = () => {
     if (view === "loading") return <main className="grid min-h-dvh place-items-center bg-[#0b0907] text-[#a89a7a]">Loading…</main>;
 
     if (view === "clearance") return (
-      <Page><h1 className="font-display text-3xl">Before you start</h1>
+      <Page><h1 className="dt-h text-3xl">Before you start</h1><Rule />
         <p className="mt-3 text-[#bfb08c]">Mirror Dash asks you to make quick, gentle facial movements. Only continue if your clinician says facial exercises are okay for you, and stop any time you feel discomfort or strain.</p>
         <p className="mt-3 text-[#bfb08c]">Your camera is used only while you play. It’s processed on your device, and video is never uploaded or saved.</p>
-        <label className="mt-5 flex items-start gap-3 rounded-2xl bg-[#c8943a]/20 p-4 text-sm"><input type="checkbox" className="mt-1 h-5 w-5 accent-[#d4a24c]" checked={agree} onChange={e => setAgree(e.target.checked)} />
+        <label className="mt-5 flex items-start gap-3 rounded bg-[#c8943a]/20 p-4 text-sm"><input type="checkbox" className="mt-1 h-5 w-5 accent-[#d4a24c]" checked={agree} onChange={e => setAgree(e.target.checked)} />
           <span>My clinician has said gentle facial exercises are okay for me, and I understand I can stop at any time.</span></label>
-        {msg && <p role="alert" className="mt-3 rounded-2xl bg-[#3a2f4a] p-3 text-sm">{msg}</p>}
-        <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-5 w-full" disabled={!agree || busy} onClick={confirmClearance}>{busy ? "Saving…" : "Continue"}</button>
-        <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => setView("hub")}>Back</button></Page>);
+        {msg && <p role="alert" className="mt-3 rounded bg-[#3a2f4a] p-3 text-sm">{msg}</p>}
+        <button className="btn-primary !rounded-md !bg-gradient-to-b !from-[#e0aa4e] !to-[#b9822c] !font-semibold !uppercase !tracking-[.14em] !text-[#1a140c] mt-5 w-full" disabled={!agree || busy} onClick={confirmClearance}>{busy ? "Saving…" : "Continue"}</button>
+        <button className="btn-quiet !rounded-md !uppercase !tracking-[.12em] !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => setView("hub")}>Back</button></Page>);
 
     if (view === "ready") return (
-      <Page><h1 className="font-display text-3xl">How to play</h1>
+      <Page><h1 className="dt-h text-3xl">How to play</h1><Rule />
         <p className="mt-2 text-[#bfb08c]">Your runner keeps running. Use these five movements to dodge, jump and fly. The run gets faster as it goes.</p>
-        <ul className="mt-4 grid gap-2">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded-2xl bg-[#1c1915] p-3 shadow-soft"><Rune m={m} size={44} /><span className="flex-1"><b>{INFO[m].action}</b><br /><span className="text-sm text-[#bfb08c]">{INFO[m].name}</span></span></li>)}</ul>
+        <ul className="mt-4 grid gap-2">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded border border-[#d4a24c]/15 bg-[#17130f]/90 p-3 shadow-soft"><Rune m={m} size={44} /><span className="flex-1"><b>{INFO[m].action}</b><br /><span className="text-sm text-[#bfb08c]">{INFO[m].name}</span></span></li>)}</ul>
         <p className="mt-3 text-xs text-[#a89a7a]">Bumps never end your run. You just stumble and slow down for a moment.</p>
-        {msg && <p role="alert" className="mt-3 rounded-2xl bg-[#3a2f4a] p-3 text-sm">{msg}</p>}
-        <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-5 min-h-[64px] w-full text-xl" disabled={busy} onClick={startGame}>{busy ? "Starting camera…" : "Start running"}</button>
-        <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => setView("hub")}>Back</button></Page>);
+        {msg && <p role="alert" className="mt-3 rounded bg-[#3a2f4a] p-3 text-sm">{msg}</p>}
+        <button className="btn-primary !rounded-md !bg-gradient-to-b !from-[#e0aa4e] !to-[#b9822c] !font-semibold !uppercase !tracking-[.14em] !text-[#1a140c] mt-5 min-h-[64px] w-full text-xl" disabled={busy} onClick={startGame}>{busy ? "Starting camera…" : "Start running"}</button>
+        <button className="btn-quiet !rounded-md !uppercase !tracking-[.12em] !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => setView("hub")}>Back</button></Page>);
 
     if (view === "calibrate") {
       const sm: M | "rest" | null = calStep === 1 ? "rest" : calStep >= 2 && calStep <= 6 ? MOVES[[0, 1, 2, 3, 4][calStep - 2]] : null;
@@ -456,51 +469,51 @@ export default function Dash() {
       return (
         <Page>
           <div className="flex gap-1.5" role="progressbar" aria-valuemin={1} aria-valuemax={8} aria-valuenow={calStep + 1} aria-label={`Step ${calStep + 1} of 8`}>{Array.from({ length: 8 }, (_, n) => <div key={n} className={`h-1.5 flex-1 rounded-full ${n <= calStep ? "bg-[#d4a24c]" : "bg-[#2d2820]"}`} />)}</div>
-          <h1 className="mt-5 font-display text-3xl">{title}</h1>
+          <h1 className="mt-5 dt-h text-3xl">{title}</h1><Rule />
           {calStep <= 6 && <>
-            <canvas ref={calCv} className="mt-4 w-full rounded-3xl bg-navy/90 shadow-soft" style={{ aspectRatio: "4 / 3" }} aria-label="Your camera preview (mirrored)" />
+            <canvas ref={calCv} className="mt-4 w-full rounded-md bg-navy/90 shadow-soft" style={{ aspectRatio: "4 / 3" }} aria-label="Your camera preview (mirrored)" />
             <div className="mt-3 flex flex-wrap gap-2" aria-live="polite">{chip(!!calQ?.face, calQ?.face ? "Face visible" : "No face yet")}{chip(!!calQ?.size, "Distance")}{chip(!!calQ?.light, "Lighting")}</div></>}
-          {calStatus && <p role="status" className="mt-3 rounded-2xl bg-[#d4a24c]/15 p-4 text-center font-display text-2xl">{calStatus}</p>}
-          {calMsg && <p role="alert" className="mt-3 rounded-2xl bg-[#3a2f4a] p-3 text-sm">{calMsg}</p>}
+          {calStatus && <p role="status" className="mt-3 rounded bg-[#d4a24c]/15 p-4 text-center dt-h text-2xl">{calStatus}</p>}
+          {calMsg && <p role="alert" className="mt-3 rounded bg-[#3a2f4a] p-3 text-sm">{calMsg}</p>}
           {calStep === 0 && <section className="mt-4"><p className="text-[#bfb08c]">Your camera is processed on this device. Video is never uploaded or saved. We’ll record your relaxed face, then each of the five movements once. Go gently.</p>
-            <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" disabled={calCam !== "off"} onClick={startCal}>{calCam === "loading" ? "Starting camera…" : calCam === "on" ? "Camera is on ✓" : "Start camera"}</button></section>}
+            <button className="btn-primary !rounded-md !bg-gradient-to-b !from-[#e0aa4e] !to-[#b9822c] !font-semibold !uppercase !tracking-[.14em] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" disabled={calCam !== "off"} onClick={startCal}>{calCam === "loading" ? "Starting camera…" : calCam === "on" ? "Camera is on ✓" : "Start camera"}</button></section>}
           {calStep === 1 && <section className="mt-4 flex flex-col items-center text-center"><Face m="rest" size={150} />
             <p className="mt-3 text-lg">Look at the camera with a comfortable, relaxed face.</p>
-            <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" disabled={calBusy || calCam !== "on"} onClick={doNeutral}>{calNeutral ? "Record again" : "Record relaxed face (3 seconds)"}</button>
+            <button className="btn-primary !rounded-md !bg-gradient-to-b !from-[#e0aa4e] !to-[#b9822c] !font-semibold !uppercase !tracking-[.14em] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" disabled={calBusy || calCam !== "on"} onClick={doNeutral}>{calNeutral ? "Record again" : "Record relaxed face (3 seconds)"}</button>
             {calNeutral && !calBusy && <p className="mt-3 text-sm text-[#bfb08c]">Got it. Your relaxed face is recorded.</p>}</section>}
           {calStep >= 2 && calStep <= 6 && sm && sm !== "rest" && <section className="mt-4 flex flex-col items-center text-center"><Face m={sm} size={150} />
             <p className="mt-3 text-xl">{INFO[sm].cue}</p><p className="mt-1 text-sm text-[#bfb08c]">{INFO[sm].tip}</p>
-            <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" disabled={calBusy || calCam !== "on"} onClick={() => doMove(sm)}>{rec ? "Record again" : "Record (4 seconds)"}</button>
+            <button className="btn-primary !rounded-md !bg-gradient-to-b !from-[#e0aa4e] !to-[#b9822c] !font-semibold !uppercase !tracking-[.14em] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" disabled={calBusy || calCam !== "on"} onClick={() => doMove(sm)}>{rec ? "Record again" : "Record (4 seconds)"}</button>
             {rec && !calBusy && <p className="mt-3 text-sm text-[#bfb08c]">{rec.detectable ? "Great. We picked up a clear movement." : "We couldn’t pick up a clear change this time. That’s okay. Try again, a little more or slower."}</p>}</section>}
           {calStep === 7 && <section className="mt-4"><ul className="grid gap-2">{MOVES.map(m => { const mv = calMoves[m]; return (
-            <li key={m} className="flex items-center gap-3 rounded-2xl bg-[#1c1915] p-3 shadow-soft"><Rune m={m} size={34} /><span className="flex-1">{INFO[m].action}</span><span className="text-sm text-[#bfb08c]">{mv?.detectable ? "Ready ✓" : mv ? "Not detected" : "Not recorded"}</span></li>); })}</ul>
+            <li key={m} className="flex items-center gap-3 rounded border border-[#d4a24c]/15 bg-[#17130f]/90 p-3 shadow-soft"><Rune m={m} size={34} /><span className="flex-1">{INFO[m].action}</span><span className="text-sm text-[#bfb08c]">{mv?.detectable ? "Ready ✓" : mv ? "Not detected" : "Not recorded"}</span></li>); })}</ul>
             <p className="mt-3 text-xs text-[#a89a7a]">Mirror Dash uses all five movements. You can recalibrate any time from Settings.</p>
-            <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" disabled={!allOk || calSaving} onClick={saveCal}>{calSaving ? "Saving…" : "Save calibration"}</button>
+            <button className="btn-primary !rounded-md !bg-gradient-to-b !from-[#e0aa4e] !to-[#b9822c] !font-semibold !uppercase !tracking-[.14em] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" disabled={!allOk || calSaving} onClick={saveCal}>{calSaving ? "Saving…" : "Save calibration"}</button>
             {!allOk && <p className="mt-2 text-sm text-[#bfb08c]">Go back and record any movement that isn’t marked Ready.</p>}</section>}
           <div className="mt-6 flex gap-3">
-            <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0]" disabled={calBusy || calSaving} onClick={() => (calStep === 0 ? closeCalibrate(false) : setCalStep(calStep - 1))}>{calStep === 0 ? "Cancel" : "Back"}</button>
-            {calStep < 7 && <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] flex-1" disabled={calBusy || !canNext} onClick={() => setCalStep(calStep + 1)}>Next</button>}
+            <button className="btn-quiet !rounded-md !uppercase !tracking-[.12em] !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0]" disabled={calBusy || calSaving} onClick={() => (calStep === 0 ? closeCalibrate(false) : setCalStep(calStep - 1))}>{calStep === 0 ? "Cancel" : "Back"}</button>
+            {calStep < 7 && <button className="btn-primary !rounded-md !bg-gradient-to-b !from-[#e0aa4e] !to-[#b9822c] !font-semibold !uppercase !tracking-[.14em] !text-[#1a140c] flex-1" disabled={calBusy || !canNext} onClick={() => setCalStep(calStep + 1)}>Next</button>}
           </div>
         </Page>);
     }
 
     if (view === "settings") return (
-      <Page><h1 className="font-display text-3xl">Settings</h1>
-        <section className="mt-5 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">1. Calibrate</h2>
+      <Page><h1 className="dt-h text-3xl">Settings</h1><Rule />
+        <section className="mt-5 rounded-md border border-[#d4a24c]/15 bg-[#17130f]/90 p-5 shadow-soft"><h2 className="dt-h text-xl">1. Calibrate</h2>
           <p className="mt-1 text-sm text-[#bfb08c]">{hasCal ? "Ready: all five movements." : "Not set up yet. Calibrating teaches the game your own comfortable movements."}</p>
-          <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-3 w-full" onClick={() => openCalibrate("settings")}>{hasCal ? "Recalibrate" : "Calibrate"}</button></section>
-        <section className="mt-3 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">2. Run length</h2>
+          <button className="btn-primary !rounded-md !bg-gradient-to-b !from-[#e0aa4e] !to-[#b9822c] !font-semibold !uppercase !tracking-[.14em] !text-[#1a140c] mt-3 w-full" onClick={() => openCalibrate("settings")}>{hasCal ? "Recalibrate" : "Calibrate"}</button></section>
+        <section className="mt-3 rounded-md border border-[#d4a24c]/15 bg-[#17130f]/90 p-5 shadow-soft"><h2 className="dt-h text-xl">2. Run length</h2>
           <div className="mt-3 grid grid-cols-3 gap-2" role="radiogroup" aria-label="Run length">{LENS.map(v => <button key={v} role="radio" aria-checked={st.len === v} onClick={() => update({ len: v })} className={`min-h-[56px] ${choice(st.len === v)}`}>{v}s</button>)}</div></section>
-        <section className="mt-3 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">3. Starting speed</h2>
+        <section className="mt-3 rounded-md border border-[#d4a24c]/15 bg-[#17130f]/90 p-5 shadow-soft"><h2 className="dt-h text-xl">3. Starting speed</h2>
           <div className="mt-3 grid grid-cols-3 gap-2" role="radiogroup" aria-label="Starting speed">{STARTS.map(x => <button key={x.v} role="radio" aria-checked={st.start === x.v} onClick={() => update({ start: x.v })} className={`min-h-[56px] ${choice(st.start === x.v)}`}>{x.n}</button>)}</div></section>
-        <section className="mt-3 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">4. How much it speeds up</h2>
+        <section className="mt-3 rounded-md border border-[#d4a24c]/15 bg-[#17130f]/90 p-5 shadow-soft"><h2 className="dt-h text-xl">4. How much it speeds up</h2>
           <div className="mt-3 grid grid-cols-3 gap-2" role="radiogroup" aria-label="Speed increase">{RAMPS.map(x => <button key={x.v} role="radio" aria-checked={st.ramp === x.v} onClick={() => update({ ramp: x.v })} className={`min-h-[56px] ${choice(st.ramp === x.v)}`}>{x.n}</button>)}</div>
           <p className="mt-2 text-xs text-[#a89a7a]">By the end of the run you’ll be going about {st.ramp}× your starting speed.</p></section>
-        <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><span><b>5. Hints</b><br /><span className="text-sm text-[#a89a7a]">Show which movement to make for the next obstacle.</span></span>
+        <label className="mt-3 flex items-center justify-between gap-4 rounded-md border border-[#d4a24c]/15 bg-[#17130f]/90 p-5 shadow-soft"><span><b>5. Hints</b><br /><span className="text-sm text-[#a89a7a]">Show which movement to make for the next obstacle.</span></span>
           <input type="checkbox" className="h-7 w-7 accent-[#d4a24c]" checked={st.hints} onChange={e => update({ hints: e.target.checked })} aria-label="Hints" /></label>
-        <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><span><b>6. Vibration</b><br /><span className="text-sm text-[#a89a7a]">Buzz after calibration steps, at the start, and when you stumble. Works on phones that allow it.</span></span>
+        <label className="mt-3 flex items-center justify-between gap-4 rounded-md border border-[#d4a24c]/15 bg-[#17130f]/90 p-5 shadow-soft"><span><b>6. Vibration</b><br /><span className="text-sm text-[#a89a7a]">Buzz after calibration steps, at the start, and when you stumble. Works on phones that allow it.</span></span>
           <input type="checkbox" className="h-7 w-7 accent-[#d4a24c]" checked={st.haptics} onChange={e => update({ haptics: e.target.checked })} aria-label="Vibration" /></label>
-        <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-4 w-full" onClick={() => setView("hub")}>Done</button></Page>);
+        <button className="btn-primary !rounded-md !bg-gradient-to-b !from-[#e0aa4e] !to-[#b9822c] !font-semibold !uppercase !tracking-[.14em] !text-[#1a140c] mt-4 w-full" onClick={() => setView("hub")}>Done</button></Page>);
 
     if (view === "stats") {
       const gs = games ?? [], done = gs.length, best = (f: (x: GameRow) => number) => gs.reduce((m, x) => Math.max(m, f(x)), 0);
@@ -508,34 +521,34 @@ export default function Dash() {
       const tot = z5() as Record<M, number>; for (const x of gs) for (const m of MOVES) tot[m] += x.per_move?.counts?.[m] ?? 0; const mx = Math.max(1, ...MOVES.map(m => tot[m]));
       const rows = gs.slice(0, 12).reverse(), dm = Math.max(1, ...rows.map(x => x.distance));
       return (
-        <Page><h1 className="font-display text-3xl">Your stats</h1>
-          <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" onClick={onPlay}>Play game</button>
+        <Page><h1 className="dt-h text-3xl">Your stats</h1><Rule />
+          <button className="btn-primary !rounded-md !bg-gradient-to-b !from-[#e0aa4e] !to-[#b9822c] !font-semibold !uppercase !tracking-[.14em] !text-[#1a140c] mt-4 min-h-[60px] w-full text-lg" onClick={onPlay}>Play game</button>
           {games === null && <p className="mt-6 text-[#a89a7a]">Loading…</p>}
-          {games && done === 0 && <p className="mt-6 rounded-2xl bg-[#1c1915] p-5 text-[#bfb08c] shadow-soft">No runs yet. Your first one will show up here.</p>}
+          {games && done === 0 && <p className="mt-6 rounded border border-[#d4a24c]/15 bg-[#17130f]/90 p-5 text-[#bfb08c] shadow-soft">No runs yet. Your first one will show up here.</p>}
           {done > 0 && <>
-            <dl className="mt-5 grid grid-cols-2 gap-3">{tiles.map(([k, v]) => <div key={k} className="rounded-2xl bg-[#1c1915] p-4 shadow-soft"><dd className="font-display text-3xl">{v}</dd><dt className="text-xs text-[#a89a7a]">{k}</dt></div>)}</dl>
-            <section className="mt-6 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">Distance, last {rows.length} runs</h2>
+            <dl className="mt-5 grid grid-cols-2 gap-3">{tiles.map(([k, v]) => <div key={k} className="rounded border border-[#d4a24c]/15 bg-[#17130f]/90 p-4 shadow-soft"><dd className="dt-h text-3xl">{v}</dd><dt className="text-xs text-[#a89a7a]">{k}</dt></div>)}</dl>
+            <section className="mt-6 rounded-md border border-[#d4a24c]/15 bg-[#17130f]/90 p-5 shadow-soft"><h2 className="dt-h text-xl">Distance, last {rows.length} runs</h2>
               <div className="mt-3 grid gap-2">{rows.map(x => <div key={x.id} className="flex items-center gap-3 text-sm"><span className="w-14 text-[#a89a7a]">{fmtDate(x.played_at)}</span><div className="h-3 flex-1 rounded-full bg-[#2d2820]"><div className="h-3 rounded-r-full bg-[#d4a24c]" style={{ width: `${Math.max(2, x.distance / dm * 100)}%` }} /></div><span className="w-14 text-right">{x.distance} m</span></div>)}</div></section>
-            <section className="mt-4 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">Movements made</h2><p className="text-xs text-[#a89a7a]">Total times across all runs.</p>
+            <section className="mt-4 rounded-md border border-[#d4a24c]/15 bg-[#17130f]/90 p-5 shadow-soft"><h2 className="dt-h text-xl">Movements made</h2><p className="text-xs text-[#a89a7a]">Total times across all runs.</p>
               <div className="mt-3 grid gap-3">{MOVES.map(m => <div key={m}><div className="flex justify-between text-sm"><span>{INFO[m].action}</span><span>{tot[m]}</span></div><div className="mt-1 h-2.5 rounded-full bg-[#2d2820]"><div className="h-2.5 rounded-r-full bg-[#d4a24c]" style={{ width: `${tot[m] / mx * 100}%` }} /></div></div>)}</div></section>
-            <section className="mt-4 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">Recent runs</h2>
+            <section className="mt-4 rounded-md border border-[#d4a24c]/15 bg-[#17130f]/90 p-5 shadow-soft"><h2 className="dt-h text-xl">Recent runs</h2>
               <ul className="mt-3 grid gap-3 text-sm">{gs.slice(0, 8).map(x => <li key={x.id} className="flex justify-between gap-3"><span>{fmtDate(x.played_at)} · {x.points} pts{x.completed ? "" : " (ended early)"}</span><span className="text-right text-[#a89a7a]">{x.distance} m · {x.coins} coins · {x.cleared} cleared · {x.stumbles} stumbles</span></li>)}</ul></section></>}
-          <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-6 w-full" onClick={() => setView("hub")}>Back</button></Page>);
+          <button className="btn-quiet !rounded-md !uppercase !tracking-[.12em] !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-6 w-full" onClick={() => setView("hub")}>Back</button></Page>);
     }
 
     if (view === "results" && result) {
       const R = result;
       return (
-        <Page><h1 className="font-display text-3xl">{R.completed ? "Run complete." : "Run ended early."}</h1>
+        <Page><h1 className="dt-h text-3xl">{R.completed ? "Run complete." : "Run ended early."}</h1><Rule />
           <p className="mt-2 text-[#bfb08c]">Nice work. Every run counts.</p>
-          <div className="mt-5 grid grid-cols-2 gap-3">{([["Points", String(R.points)], ["Distance", `${R.distance} m`], ["Coins", String(R.coins)], ["Obstacles cleared", String(R.cleared)], ["Stumbles", String(R.stumbles)], ["Top speed", `${R.topSpeed.toFixed(1)}`]] as [string, string][]).map(([k, v]) => <div key={k} className="rounded-2xl bg-[#1c1915] p-4 shadow-soft"><div className="font-display text-3xl">{v}</div><div className="text-xs text-[#a89a7a]">{k}</div></div>)}
-            <div className="col-span-2 rounded-2xl bg-[#1c1915] p-4 shadow-soft"><div className="font-display text-3xl">{R.bestStreak}</div><div className="text-xs text-[#a89a7a]">Best streak (obstacles cleared in a row)</div></div></div>
-          <section className="mt-5 rounded-3xl bg-[#1c1915] p-5 shadow-soft"><h2 className="font-display text-xl">Movements made</h2>
+          <div className="mt-5 grid grid-cols-2 gap-3">{([["Points", String(R.points)], ["Distance", `${R.distance} m`], ["Coins", String(R.coins)], ["Obstacles cleared", String(R.cleared)], ["Stumbles", String(R.stumbles)], ["Top speed", `${R.topSpeed.toFixed(1)}`]] as [string, string][]).map(([k, v]) => <div key={k} className="rounded border border-[#d4a24c]/15 bg-[#17130f]/90 p-4 shadow-soft"><div className="dt-h text-3xl">{v}</div><div className="text-xs text-[#a89a7a]">{k}</div></div>)}
+            <div className="col-span-2 rounded border border-[#d4a24c]/15 bg-[#17130f]/90 p-4 shadow-soft"><div className="dt-h text-3xl">{R.bestStreak}</div><div className="text-xs text-[#a89a7a]">Best streak (obstacles cleared in a row)</div></div></div>
+          <section className="mt-5 rounded-md border border-[#d4a24c]/15 bg-[#17130f]/90 p-5 shadow-soft"><h2 className="dt-h text-xl">Movements made</h2>
             <ul className="mt-3 grid gap-2">{MOVES.map(m => <li key={m} className="flex items-center gap-3 text-sm"><Rune m={m} size={30} /><span className="flex-1">{INFO[m].action}</span><b>{R.counts[m]}</b></li>)}</ul></section>
-          {!R.saved && <p role="alert" className="mt-4 rounded-2xl bg-[#3a2f4a] p-4 text-sm">{msg ?? "Saving this run…"}</p>}
-          <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-6 min-h-[60px] w-full text-lg" onClick={onPlay}>Run again</button>
-          <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={openStats}>See my stats</button>
-          <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => setView("hub")}>Home</button></Page>);
+          {!R.saved && <p role="alert" className="mt-4 rounded bg-[#3a2f4a] p-4 text-sm">{msg ?? "Saving this run…"}</p>}
+          <button className="btn-primary !rounded-md !bg-gradient-to-b !from-[#e0aa4e] !to-[#b9822c] !font-semibold !uppercase !tracking-[.14em] !text-[#1a140c] mt-6 min-h-[60px] w-full text-lg" onClick={onPlay}>Run again</button>
+          <button className="btn-quiet !rounded-md !uppercase !tracking-[.12em] !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={openStats}>See my stats</button>
+          <button className="btn-quiet !rounded-md !uppercase !tracking-[.12em] !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => setView("hub")}>Home</button></Page>);
     }
 
     if (view === "play") return (
@@ -544,54 +557,57 @@ export default function Dash() {
           <canvas ref={cvRef} style={{ width: "100%", height: "100%" }} aria-label="Three-lane runner. Use your facial movements to dodge, jump, duck and fly." />
         </div>
         <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center">
-          <div className="w-full rounded-b-3xl border-b border-x border-[#d4a24c]/40 bg-[#100d0a]/80 shadow-soft backdrop-blur" style={{ maxWidth: Math.max(box.w, 320), paddingTop: "env(safe-area-inset-top, 0px)" }}>
+          <div className="w-full rounded-b-lg border-b border-x border-[#d4a24c]/40 bg-[#100d0a]/80 shadow-soft backdrop-blur" style={{ maxWidth: Math.max(box.w, 320), paddingTop: "env(safe-area-inset-top, 0px)" }}>
             <div className="flex items-center justify-between gap-2 px-5" style={{ height: TOPBAR }} role="status">
-              <div><div className="font-display text-4xl leading-none text-[#e9c26a]">{ui.dist}<span className="ml-1 text-sm text-[#a89a7a]">m</span></div><div className="mt-1 text-[11px] uppercase tracking-widest text-[#a89a7a]">Speed ×{ui.mul.toFixed(1)}</div></div>
-              <div className="text-center"><div className="flex items-center justify-center gap-1.5 font-display text-3xl leading-none text-[#efe4c8]"><Coin size={26} /> {ui.coins}</div><div className="mt-1 text-[11px] uppercase tracking-widest text-[#a89a7a]">Relics</div></div>
+              <div><div className="dt-h text-4xl leading-none text-[#e9c26a]">{ui.dist}<span className="ml-1 text-sm text-[#a89a7a]">m</span></div><div className="mt-1 text-[11px] uppercase tracking-widest text-[#a89a7a]">Speed ×{ui.mul.toFixed(1)}</div></div>
+              <div className="text-center"><div className="flex items-center justify-center gap-1.5 dt-h text-3xl leading-none text-[#efe4c8]"><Coin size={26} /> {ui.coins}</div><div className="mt-1 text-[11px] uppercase tracking-widest text-[#a89a7a]">Relics</div></div>
               <div className="relative grid h-16 w-16 shrink-0 place-items-center" aria-label={`${ui.left} seconds left`}>
                 <svg width="64" height="64" viewBox="0 0 64 64" className="absolute inset-0 -rotate-90" aria-hidden><circle cx="32" cy="32" r="28" fill="none" stroke="#3a3225" strokeWidth="5" /><circle cx="32" cy="32" r="28" fill="none" stroke="#d4a24c" strokeWidth="5" strokeLinecap="round" strokeDasharray={175.9} strokeDashoffset={175.9 * (1 - ui.left / cfg.current.len)} /></svg>
-                <span className="font-display text-xl text-[#efe4c8]">{ui.left}</span></div>
+                <span className="dt-h text-xl text-[#efe4c8]">{ui.left}</span></div>
             </div></div></div>
-        {st.hints && ui.stage === "play" && ui.hint && <div className="pointer-events-none absolute inset-x-0 z-20 flex justify-center px-4" style={{ top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 10}px)` }}><div className="rounded-full border border-[#d4a24c]/60 bg-[#100d0a]/85 px-5 py-2 font-display text-lg tracking-wide text-[#efe4c8] shadow-soft" role="status">{ui.hint}</div></div>}
+        {st.hints && ui.stage === "play" && ui.hint && <div className="pointer-events-none absolute inset-x-0 z-20 flex justify-center px-4" style={{ top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 10}px)` }}><div className="rounded-sm border border-[#d4a24c]/60 bg-[#100d0a]/85 px-5 py-2 dt-h text-lg tracking-wide text-[#efe4c8] shadow-soft" role="status">{ui.hint}</div></div>}
         {ui.stumble && ui.stage === "play" && <div className="pointer-events-none absolute inset-x-0 z-20 text-center text-sm font-semibold text-[#efe4c8]" style={{ top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 56}px)` }}>Stumble. Keep going!</div>}
         <button aria-label="Pause" onClick={() => { g.current.manual = true; }} className="absolute z-20 grid h-14 w-14 place-items-center rounded-full border border-[#d4a24c]/40 bg-[#100d0a]/80 shadow-soft" style={{ left: 12, top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 10}px)` }}>
           <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden><rect x="4" y="3" width="5" height="16" rx="1.5" fill="#d4a24c" /><rect x="13" y="3" width="5" height="16" rx="1.5" fill="#d4a24c" /></svg></button>
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center pb-[max(10px,env(safe-area-inset-bottom))]"><div className="grid w-full grid-cols-5 gap-1.5 px-2" style={{ maxWidth: Math.max(box.w, 320) }}>
-          {MOVES.map(m => <div key={m} className={`flex flex-col items-center rounded-2xl border px-1 py-2 text-center text-[11px] leading-tight shadow-soft ${ui.on[m] ? "border-[#e9c26a] bg-[#d4a24c] text-[#1a140c]" : "border-[#d4a24c]/30 bg-[#100d0a]/80 text-[#d8c9a4]"}`}><Rune m={m} size={30} on={ui.on[m]} /><span className="mt-0.5 whitespace-pre-line">{SHORT[m]}</span>
+          {MOVES.map(m => <div key={m} className={`flex flex-col items-center rounded border px-1 py-2 text-center text-[11px] leading-tight shadow-soft ${ui.on[m] ? "border-[#e9c26a] bg-[#d4a24c] text-[#1a140c]" : "border-[#d4a24c]/30 bg-[#100d0a]/80 text-[#d8c9a4]"}`}><Rune m={m} size={30} on={ui.on[m]} /><span className="mt-0.5 whitespace-pre-line">{SHORT[m]}</span>
             <span className="mt-1 h-1.5 w-full rounded-full bg-black/30"><span className="block h-1.5 rounded-full bg-[#fff1c2]" style={{ width: `${Math.round(ui.lev[m] * 100)}%` }} /></span></div>)}</div></div>
         {ui.stage === "ready" && !ui.paused && !ui.adjust && <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-navy/85 px-6 text-center text-ivory" role="status">
-          <h2 className="font-display text-4xl">Get ready</h2>
-          <ul className="mt-4 grid w-full max-w-xs gap-2 text-left">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded-2xl bg-ivory/10 px-3 py-2"><Rune m={m} size={34} /><span className="text-lg">{INFO[m].action}</span></li>)}</ul>
-          <p className="mt-5 font-display text-3xl">Starting in {ui.ready}</p>
-          <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-4" onClick={() => { g.current.readyLeft = 0; }}>I’m ready, start now</button></div>}
-        {ui.adjust && !ui.paused && <div className="absolute inset-0 z-40 grid place-items-center bg-navy/70 p-8 text-center text-ivory" role="alert"><div><p className="font-display text-3xl">Let’s adjust your camera</p>
+          <h2 className="dt-h text-4xl">Get ready</h2>
+          <ul className="mt-4 grid w-full max-w-xs gap-2 text-left">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded bg-ivory/10 px-3 py-2"><Rune m={m} size={34} /><span className="text-lg">{INFO[m].action}</span></li>)}</ul>
+          <p className="mt-5 dt-h text-3xl">Starting in {ui.ready}</p>
+          <button className="btn-primary !rounded-md !bg-gradient-to-b !from-[#e0aa4e] !to-[#b9822c] !font-semibold !uppercase !tracking-[.14em] !text-[#1a140c] mt-4" onClick={() => { g.current.readyLeft = 0; }}>I’m ready, start now</button></div>}
+        {ui.adjust && !ui.paused && <div className="absolute inset-0 z-40 grid place-items-center bg-navy/70 p-8 text-center text-ivory" role="alert"><div><p className="dt-h text-3xl">Let’s adjust your camera</p>
           <p className="mt-3 text-base">We can’t see your face clearly. Center it and add light. The game waits, and nothing is counted against you.</p></div></div>}
         {ui.paused && <div className="absolute inset-0 z-50 grid place-items-center bg-navy/75 p-6 text-ivory" role="dialog" aria-label="Paused"><div className="w-full max-w-xs text-center">
-          <p className="font-display text-3xl">Paused</p><p className="mt-1 text-sm text-ivory/75">Take as long as you need.</p>
-          <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-5 w-full" onClick={() => { g.current.manual = false; }}>Resume</button>
-          <div className="mt-4 rounded-2xl bg-ivory/10 p-3 text-sm"><p>Sensitivity {Math.max(1, GAINS.indexOf(gainUi) + 1)} of 5</p><p className="text-xs text-ivory/70">Movements not registering? Try Easier.</p>
-            <div className="mt-2 grid grid-cols-2 gap-2"><button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] min-h-[48px]" onClick={() => { const v = GAINS[Math.min(4, Math.max(0, GAINS.indexOf(gainUi)) + 1)]; liveGain.current = v; setGainUi(v); }}>Easier</button>
-              <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] min-h-[48px]" onClick={() => { const v = GAINS[Math.max(0, Math.max(0, GAINS.indexOf(gainUi)) - 1)]; liveGain.current = v; setGainUi(v); }}>Harder</button></div></div>
-          <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => setPreview(p => !p)}>{preview ? "Hide camera preview" : "Show camera preview"}</button>
-          <button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => finish(false)}>End run</button></div></div>}
+          <p className="dt-h text-3xl">Paused</p><p className="mt-1 text-sm text-ivory/75">Take as long as you need.</p>
+          <button className="btn-primary !rounded-md !bg-gradient-to-b !from-[#e0aa4e] !to-[#b9822c] !font-semibold !uppercase !tracking-[.14em] !text-[#1a140c] mt-5 w-full" onClick={() => { g.current.manual = false; }}>Resume</button>
+          <div className="mt-4 rounded bg-ivory/10 p-3 text-sm"><p>Sensitivity {Math.max(1, GAINS.indexOf(gainUi) + 1)} of 5</p><p className="text-xs text-ivory/70">Movements not registering? Try Easier.</p>
+            <div className="mt-2 grid grid-cols-2 gap-2"><button className="btn-quiet !rounded-md !uppercase !tracking-[.12em] !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] min-h-[48px]" onClick={() => { const v = GAINS[Math.min(4, Math.max(0, GAINS.indexOf(gainUi)) + 1)]; liveGain.current = v; setGainUi(v); }}>Easier</button>
+              <button className="btn-quiet !rounded-md !uppercase !tracking-[.12em] !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] min-h-[48px]" onClick={() => { const v = GAINS[Math.max(0, Math.max(0, GAINS.indexOf(gainUi)) - 1)]; liveGain.current = v; setGainUi(v); }}>Harder</button></div></div>
+          <button className="btn-quiet !rounded-md !uppercase !tracking-[.12em] !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => setPreview(p => !p)}>{preview ? "Hide camera preview" : "Show camera preview"}</button>
+          <button className="btn-quiet !rounded-md !uppercase !tracking-[.12em] !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] mt-3 w-full" onClick={() => finish(false)}>End run</button></div></div>}
       </div>);
 
     // hub
     return (
-      <Page>
-        <a href="/dashboard" className="text-sm text-[#a89a7a]">← Home</a>
-        <svg viewBox="0 0 240 130" className="mt-4 w-full rounded-3xl shadow-soft" aria-hidden><defs><linearGradient id="hs" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#0a1b22" /><stop offset=".6" stopColor="#285043" /><stop offset="1" stopColor="#e3a25a" /></linearGradient></defs><rect width="240" height="130" fill="url(#hs)" /><circle cx="150" cy="70" r="22" fill="#ffe2a0" opacity=".9" />
-          <path d="M0 80Q40 55 80 72T160 66T240 76V130H0Z" fill="#1c382f" /><g fill="#0f1d19"><rect x="82" y="52" width="76" height="9" /><rect x="94" y="43" width="52" height="9" /><rect x="105" y="34" width="30" height="9" /><rect x="114" y="25" width="12" height="9" /></g><rect x="118" y="28" width="4" height="6" fill="#ffc46e" />
-          <polygon points="108,82 132,82 205,130 35,130" fill="#6f6250" /><line x1="116" y1="82" x2="95" y2="130" stroke="#000" strokeOpacity=".3" /><line x1="124" y1="82" x2="145" y2="130" stroke="#000" strokeOpacity=".3" />
-          <ellipse cx="120" cy="116" rx="11" ry="13" fill="#d4672a" stroke="#20120a" strokeWidth="1.5" /><circle cx="120" cy="100" r="8" fill="#e07a32" stroke="#20120a" strokeWidth="1.5" /><path d="M113 96l-2-11 8 6zM127 96l2-11-8 6z" fill="#d4672a" stroke="#20120a" strokeWidth="1.2" /><path d="M126 118q16-2 14-18q-8 10-16 8z" fill="#e0813a" stroke="#20120a" strokeWidth="1.2" /></svg>
-        <h1 className="mt-5 font-display text-4xl">Mirror Dash</h1>
-        <p className="mt-2 text-[#bfb08c]">A fast three-lane runner for when you’re ready for a challenge. Smile to jump, raise your eyebrows to fly, frown to duck, and pucker left or right to switch lanes.</p>
-        {msg && <p role="alert" className="mt-3 rounded-2xl bg-[#3a2f4a] p-3 text-sm">{msg}</p>}
-        <button className="btn-primary !bg-[#c8943a] !text-[#1a140c] mt-5 min-h-[64px] w-full text-xl" onClick={onPlay}>Play game</button>
-        {!hasCal && <p className="mt-2 text-center text-xs text-[#a89a7a]">First time? We’ll set up your camera next.</p>}
-        <div className="mt-3 grid grid-cols-2 gap-3"><button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] min-h-[56px]" onClick={openStats}>Stats</button><button className="btn-quiet !border-[#d4a24c]/30 !bg-[#2a251d] !text-[#e8dcc0] min-h-[56px]" onClick={() => setView("settings")}>Settings</button></div>
-        {ios && <p className="mt-6 rounded-2xl bg-[#3a2f4a]/60 p-4 text-xs text-[#bfb08c]">For the full-screen version on iPhone: tap the Share button in Safari, choose <b>Add to Home Screen</b>, then open SmileQuest from your home screen.</p>}
-      </Page>);
+      <div className="fixed inset-0 overflow-hidden bg-[#0b0907] text-[#efe4c8]">
+        <canvas ref={hubCv} aria-hidden className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" style={{ width: hubBox.w, height: hubBox.h }} />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/5 to-black/90" />
+        <div className="relative mx-auto flex h-full max-w-md flex-col justify-between overflow-y-auto px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))]">
+          <a href="/dashboard" className="text-xs uppercase tracking-[.3em] text-[#d8c9a4]">← Home</a>
+          <div>
+            <p className="text-xs uppercase tracking-[.35em] text-[#d4a24c]">For advanced practice</p>
+            <h1 className="dt-h mt-2 text-5xl font-bold leading-[1.05] text-[#f3e2b0]">MIRROR<br />DASH</h1><Rule />
+            <p className="text-[#d8c9a4]">Run the ruins. Smile to jump, raise your eyebrows to fly, frown to duck, and pucker left or right to change lanes.</p>
+            {msg && <p role="alert" className="mt-3 rounded bg-[#3a2f4a] p-3 text-sm">{msg}</p>}
+            <button className="btn-primary !rounded-md !bg-gradient-to-b !from-[#e0aa4e] !to-[#b9822c] !text-[#1a140c] !font-semibold !uppercase !tracking-[.16em] mt-5 min-h-[64px] w-full text-lg" onClick={onPlay}>Play game</button>
+            {!hasCal && <p className="mt-2 text-center text-xs text-[#a89a7a]">First time? We’ll set up your camera next.</p>}
+            <div className="mt-3 grid grid-cols-2 gap-3"><button className="btn-quiet !rounded-md !uppercase !tracking-[.12em] !border-[#d4a24c]/30 !bg-black/50 !text-[#e8dcc0] min-h-[56px]" onClick={openStats}>Stats</button><button className="btn-quiet !rounded-md !uppercase !tracking-[.12em] !border-[#d4a24c]/30 !bg-black/50 !text-[#e8dcc0] min-h-[56px]" onClick={() => setView("settings")}>Settings</button></div>
+            {ios && <p className="mt-4 rounded bg-black/50 p-3 text-xs text-[#bfb08c]">For the full-screen version on iPhone: tap the Share button in Safari, choose <b>Add to Home Screen</b>, then open SmileQuest from your home screen.</p>}
+          </div>
+        </div>
+      </div>);
   };
-  return <>{videoEl}{body()}</>;
+  return <>{videoEl}<style>{"@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&display=swap');.dt-h{font-family:'Cinzel',Georgia,serif;letter-spacing:.06em}"}</style>{body()}</>;
 }
