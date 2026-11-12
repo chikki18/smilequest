@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { createTracker, type Frame } from "@/lib/tracking";
 import { POLICY_VERSION } from "@/lib/onboarding";
+import { loadContext, endSession, moveLabel } from "@/lib/workflow";
 
 type Move = { threshold: number; range: number; detectable: boolean; nm: number };
 const KEYS = ["smile", "brow", "pucker", "close"] as const;
@@ -68,15 +69,18 @@ export default function Studio() {
   const [gain, setGain] = useState(1.3), [dir, setDir] = useState(1), [showSides, setShowSides] = useState(false), [preview, setPreview] = useState(true);
   const [msg, setMsg] = useState<string | null>(null), [busy, setBusy] = useState(false);
   const [ui, setUi] = useState({ lev: { smile: 0, brow: 0, pucker: 0, close: 0 } as Record<K, number>, adjust: false, paused: false, L: 0, R: 0 });
+  const sessId = useRef<string | null>(null), startedAt = useRef(Date.now()), saves = useRef(0);
   const S = useRef({ mode, palette, gain, dir, cal, neutral }); S.current = { mode, palette, gain, dir, cal, neutral };
 
   useEffect(() => { (async () => {
     const { data: { user } } = await supabase().auth.getUser();
     if (!user) { setMsg("Please log in on the home page first."); setPhase("nocal"); return; }
+    const ctx = await loadContext(); if (!ctx.session) { location.href = "/session"; return; }
+    sessId.current = ctx.session.id;
     const { data } = await supabase().from("calibration_profiles").select("summary").order("created_at", { ascending: false }).limit(1).maybeSingle();
     const m: Partial<Record<K, Move>> = {};
-    for (const k of KEYS) { const v = data?.summary?.moves?.[k]; if (v?.detectable) m[k] = { ...v, nm: v.threshold - 0.5 * v.range }; }
-    if (!Object.keys(m).length) { setPhase("nocal"); return; }
+    for (const k of KEYS) { const v = data?.summary?.moves?.[k]; if (v?.detectable && (!ctx.allowed || ctx.allowed.includes(k))) m[k] = { ...v, nm: v.threshold - 0.5 * v.range }; }
+    if (!Object.keys(m).length) { setMsg("None of your approved movements are calibrated yet. Set up your camera for them first."); setPhase("nocal"); return; }
     setCal(m); setNeutral(data?.summary?.neutral ?? {}); setPhase("pick");
   })(); return () => stop(); }, []);
 
@@ -165,7 +169,14 @@ export default function Studio() {
     setMsg(null); const { data: { user } } = await supabase().auth.getUser();
     if (!user || !art.current) { setMsg("Please log in to save."); return; }
     const { error } = await supabase().from("saved_artwork").insert({ user_id: user.id, mode, title: `${mode === "reveal" ? "Watercolor" : "Pottery"} · ${new Date().toLocaleDateString()}`, image_data: art.current.url() });
+    if (!error) saves.current++;
     setMsg(error ? `Couldn’t save: ${error.message}` : "Saved to your gallery.");
+  }
+  async function finishSession() {
+    if (!sessId.current) return; const secs = (Date.now() - startedAt.current) / 1000;
+    const ok = await endSession(sessId.current, "canvas", secs, { mode_used: mode === "reveal" ? "Watercolor Reveal" : "Pottery & Sculpture", artworks_saved: saves.current, movements: KEYS.filter(k => cal[k]).map(k => moveLabel(k)) });
+    if (!ok) { setMsg("Couldn’t save your session. Please try again."); return; }
+    stop(); location.href = "/summary";
   }
   function download() { if (!art.current) return; const a = document.createElement("a"); a.href = art.current.url(); a.download = `smilequest-${mode}.jpg`; a.click(); }
 
@@ -220,6 +231,7 @@ export default function Studio() {
         </div>
         <div className="mt-4 flex gap-2">
           <button className="btn-quiet min-h-[48px] flex-1" onClick={() => { stop(); setPhase("pick"); }}>Rest / change mode</button>
+          <button className="btn-primary min-h-[48px] flex-1" onClick={finishSession}>Finish session</button>
           <a className="btn-quiet inline-flex min-h-[48px] flex-1 items-center justify-center" href="/gallery" onClick={stop}>Gallery</a></div>
       </main>);
   };
