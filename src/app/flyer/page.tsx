@@ -19,13 +19,15 @@ const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const r1 = (v: number) => Math.round(v * 10) / 10;
 
 const LENS = [30, 40, 60, 80];
-type Settings = { auto: boolean; exprs: K[]; len: number; gain: number; gap: number; pace: number };
-const AUTO: Settings = { auto: true, exprs: [...KEYS], len: 80, gain: 1.7, gap: 290, pace: 75 };
+const PACES = [{ v: 50, n: "Very slow" }, { v: 65, n: "Slow" }, { v: 75, n: "Relaxed (recommended)" }, { v: 100, n: "Normal" }, { v: 130, n: "Fast" }];
+const buzz = (p: number | number[]) => { try { if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(p); } catch { /* not supported */ } };
+type Settings = { auto: boolean; exprs: K[]; len: number; gain: number; gap: number; pace: number; haptics: boolean };
+const AUTO: Settings = { auto: true, exprs: [...KEYS], len: 80, gain: 1.7, gap: 290, pace: 75, haptics: true };
 const SKEY = "smilequest.flight.settings";
 const loadSettings = (): Settings => {
   try { const raw = localStorage.getItem(SKEY); if (raw) { const j = JSON.parse(raw);
     const ex = Array.isArray(j.exprs) ? j.exprs.filter((x: string) => (KEYS as readonly string[]).includes(x)) : AUTO.exprs;
-    return { ...AUTO, ...j, exprs: ex.length ? ex : AUTO.exprs, len: LENS.includes(j.len) ? j.len : AUTO.len }; } } catch { /* ignore */ }
+    return { ...AUTO, ...j, exprs: ex.length ? ex : AUTO.exprs, len: LENS.includes(j.len) ? j.len : AUTO.len, pace: PACES.reduce((b, x) => Math.abs(x.v - j.pace) < Math.abs(b - j.pace) ? x.v : b, PACES[2].v), haptics: j.haptics !== false }; } } catch { /* ignore */ }
   return AUTO;
 };
 const saveSettings = (s: Settings) => { try { localStorage.setItem(SKEY, JSON.stringify(s)); } catch { /* ignore */ } };
@@ -205,7 +207,7 @@ export default function Flight() {
   const [box, setBox] = useState({ w: 360, h: 640 });
   const [ui, setUi] = useState({ stage: "ready" as "ready" | "play" | "done", si: 0, total: 4, ready: 6, left: 20, adjust: false, paused: false, k: "smile" as K });
   const [result, setResult] = useState<Result | null>(null), [games, setGames] = useState<GameRow[] | null>(null);
-  const calRef = useRef(cal); calRef.current = cal;
+  const calRef = useRef(cal); calRef.current = cal; const hap = useRef({ act: false }); const hapOn = useRef(true); hapOn.current = st.haptics;
   const P = useRef(prof); P.current = prof;
   const hasCal = Object.keys(cal).length > 0;
   const [calFrom, setCalFrom] = useState<"play" | "settings">("play");
@@ -264,7 +266,7 @@ export default function Flight() {
     const s = await grab(2, 3, "Relax your face…", "Stay relaxed…"); if (!s) return;
     const n: Record<string, { mean: number; std: number }> = {};
     for (const k of CAL_KEYS) { const a = s.map(x => x[k]); n[k] = { mean: mean(a), std: sd(a) }; }
-    setCalNeutral(n); setCalMoves({});
+    setCalNeutral(n); setCalMoves({}); if (st.haptics) buzz(120);
   }
   async function doMove(k: K) {
     if (!calNeutral) return;
@@ -273,7 +275,7 @@ export default function Flight() {
     const nm = calNeutral[k], peak = mean(top.map(x => x[k])), range = peak - nm.mean;
     const detectable = range > Math.max(3 * nm.std, CAL_MIN[k]), sides = CAL_SIDES[k];
     const sideDelta = sides ? sides.map(x => mean(top.map(t => t[x])) - calNeutral[x].mean) : null;
-    setCalMoves(m => ({ ...m, [k]: { peak, range, threshold: nm.mean + 0.5 * range, detectable, sideDelta } }));
+    setCalMoves(m => ({ ...m, [k]: { peak, range, threshold: nm.mean + 0.5 * range, detectable, sideDelta } })); if (st.haptics) buzz(detectable ? 120 : [60, 60, 60]);
   }
   async function saveCal() {
     if (!calNeutral) return; setCalSaving(true); setCalMsg(null);
@@ -283,7 +285,7 @@ export default function Flight() {
     if (error) { setCalMsg(`Couldn’t save: ${error.message}`); return; }
     const m: Partial<Record<K, Move>> = {};
     for (const k of KEYS) { const v = calMoves[k]; if (v?.detectable) m[k] = { ...v, nm: v.threshold - 0.5 * v.range }; }
-    setCal(m); closeCalibrate(true);
+    setCal(m); if (st.haptics) buzz([100, 80, 100]); closeCalibrate(true);
   }
   function update(p: Partial<Settings>) { const n = { ...st, ...p }; setSt(n); saveSettings(n); }
   async function bank(earned: number, p: Prof = P.current): Promise<boolean> {
@@ -312,7 +314,7 @@ export default function Flight() {
   }
 
   async function startGame() {
-    const eff = st.auto ? AUTO : st;
+    const eff = { exprs: st.exprs, pace: st.pace, gain: st.auto ? AUTO.gain : st.gain, gap: st.auto ? AUTO.gap : st.gap };
     const plan = eff.exprs.filter(k => cal[k]);
     if (!plan.length) { setMsg("None of your chosen movements are calibrated yet. Recalibrate or change your settings."); setView("hub"); return; }
     setBusy(true); setMsg(null);
@@ -378,8 +380,9 @@ export default function Flight() {
       const k = s.plan[s.si], m = calRef.current[k]; if (!m) return;
       let l = clamp(liveGain.current * (fr.vals[k] - m.nm) / m.range, 0, 1); if (l < .12) l = 0;
       s.lev += (l - s.lev) * .3; s.flap += dt * (8 + s.lev * 12); s.active = s.lev >= HOVER;
+      if (s.stage === "play" && k === "close" && s.active !== hap.current.act) { hap.current.act = s.active; if (hapOn.current) buzz(s.active ? 40 : [30, 50, 30]); }
       const ground = s.wh - GROUND_H;
-      if (s.stage === "ready") { s.readyLeft -= dt; s.y = s.mid + Math.sin(now / 400) * 6; s.vy = 0; if (s.readyLeft <= 0) { s.stage = "play"; s.stageT = 0; } return; }
+      if (s.stage === "ready") { s.readyLeft -= dt; s.y = s.mid + Math.sin(now / 400) * 6; s.vy = 0; if (s.readyLeft <= 0) { s.stage = "play"; s.stageT = 0; hap.current.act = false; if (hapOn.current) buzz(150); } return; }
       s.t += dt; s.stageT += dt;
       const p = s.per[s.si]; p.valid += dt; if (s.active) p.on += dt;
       const ahead = s.coins.find(co => !co.got && co.x - s.scroll > BX - 12 && co.x - s.scroll < BX + 170);
@@ -506,7 +509,6 @@ export default function Flight() {
     }
 
     if (view === "settings") {
-      const n = st.auto ? AUTO : st;
       return (
         <Page><h1 className="font-display text-3xl">Settings</h1>
           <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">1. Calibrate</h2>
@@ -515,19 +517,22 @@ export default function Flight() {
           <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">2. Game length</h2>
             <div className="mt-3 grid grid-cols-4 gap-2" role="radiogroup" aria-label="Game length">{LENS.map(v => <button key={v} role="radio" aria-checked={st.len === v} onClick={() => update({ len: v })} className={`min-h-[56px] rounded-2xl border ${st.len === v ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`}>{v}s</button>)}</div>
             <p className="mt-2 text-xs text-navy/60">Play time only. The short get-ready breaks between expressions are extra.</p></section>
-          <h2 className="mt-6 font-display text-xl">3. Game settings</h2>
-          <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>Automatic settings</b><br /><span className="text-sm text-navy/60">Recommended. Picks everything for you.</span></span>
-            <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.auto} onChange={e => update({ auto: e.target.checked })} aria-label="Automatic settings" /></label>
-          {st.auto ? <div className="mt-4 rounded-3xl bg-sage/30 p-5 text-sm"><p>All four expressions, in order: gentle smile, eyebrow raise, lip pucker, gentle eye closure.</p>
-            <p className="mt-2">{PER(KEYS.filter(k => cal[k]).length || 4, st.len)}. Before each one you get a big picture and a few seconds to get ready.</p></div>
-          : <div className="mt-4 grid gap-4">
-            <div><h2 className="font-display text-xl">Expressions</h2><div className="mt-2 grid gap-2">{KEYS.map(k => (
-              <button key={k} role="checkbox" aria-checked={n.exprs.includes(k)} disabled={!cal[k]} onClick={() => { const has = n.exprs.includes(k); const nx = has ? n.exprs.filter(x => x !== k) : KEYS.filter(x => n.exprs.includes(x) || x === k); if (nx.length) update({ exprs: nx as K[] }); }}
-                className={`flex min-h-[64px] items-center gap-3 rounded-2xl border px-3 text-left ${n.exprs.includes(k) ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"} disabled:opacity-40`}><FaceArt k={k} size={44} /><span>{EXPR[k].name}{!cal[k] && <span className="block text-xs text-navy/60">Not calibrated</span>}</span></button>))}</div></div>
-            <p className="text-xs text-navy/60">{PER(Math.max(1, n.exprs.filter(k => cal[k]).length), st.len)}.</p>
-            <label className="text-sm">Sensitivity<select className="field mt-1" value={n.gain} onChange={e => update({ gain: +e.target.value })}>{GAINS.map((v, i) => <option key={v} value={v}>{i + 1} of 5{i === 2 ? " (recommended)" : i === 0 ? " (your exact target)" : i === 4 ? " (tiny movements count)" : ""}</option>)}</select></label>
-            <label className="text-sm">Gap size<select className="field mt-1" value={n.gap} onChange={e => update({ gap: +e.target.value })}><option value={250}>Wide</option><option value={290}>Extra wide (recommended)</option><option value={330}>Huge</option></select></label>
-            <label className="text-sm">Pace<select className="field mt-1" value={n.pace} onChange={e => update({ pace: +e.target.value })}><option value={60}>Very slow</option><option value={75}>Slow (recommended)</option><option value={100}>Normal</option></select></label></div>}
+          <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">3. Expressions</h2>
+            <div className="mt-3 flex flex-wrap gap-2">{([["All four", [...KEYS]], ["Smile only", ["smile"]], ["Eyebrows only", ["brow"]], ["Smile + eyebrows", ["smile", "brow"]]] as [string, string[]][]).map(([lab, ks]) => { const ok = ks.every(k => cal[k as K]); const on = st.exprs.length === ks.length && ks.every(k => st.exprs.includes(k as K)); return <button key={lab} disabled={!ok} aria-pressed={on} onClick={() => update({ exprs: ks as K[] })} className={`min-h-[48px] rounded-2xl border px-4 text-sm disabled:opacity-40 ${on ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`}>{lab}</button>; })}</div>
+            <div className="mt-3 grid gap-2">{KEYS.map(k => (
+              <button key={k} role="checkbox" aria-checked={st.exprs.includes(k)} disabled={!cal[k]} onClick={() => { const has = st.exprs.includes(k); const nx = has ? st.exprs.filter(x => x !== k) : KEYS.filter(x => st.exprs.includes(x) || x === k); if (nx.length) update({ exprs: nx as K[] }); }}
+                className={`flex min-h-[64px] items-center gap-3 rounded-2xl border px-3 text-left ${st.exprs.includes(k) ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"} disabled:opacity-40`}><FaceArt k={k} size={44} /><span>{EXPR[k].name}{!cal[k] && <span className="block text-xs text-navy/60">Not calibrated</span>}</span></button>))}</div>
+            <p className="mt-2 text-xs text-navy/60">{PER(Math.max(1, st.exprs.filter(k => cal[k]).length), st.len)}.</p></section>
+          <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">4. Game speed</h2>
+            <div className="mt-3 grid gap-2" role="radiogroup" aria-label="Game speed">{PACES.map(x => <button key={x.v} role="radio" aria-checked={st.pace === x.v} onClick={() => update({ pace: x.v })} className={`min-h-[52px] rounded-2xl border px-4 text-left ${st.pace === x.v ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`}>{x.n}</button>)}</div></section>
+          <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>5. Vibration</b><br /><span className="text-sm text-navy/60">Buzz after each calibration step, when each expression starts, and when your eyes close or open. Works on phones that allow it.</span></span>
+            <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.haptics} onChange={e => update({ haptics: e.target.checked })} aria-label="Vibration" /></label>
+          <h2 className="mt-6 font-display text-xl">6. Advanced</h2>
+          <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>Automatic sensitivity and gap size</b><br /><span className="text-sm text-navy/60">Recommended. Turn off to adjust them yourself.</span></span>
+            <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.auto} onChange={e => update({ auto: e.target.checked })} aria-label="Automatic sensitivity and gap size" /></label>
+          {!st.auto && <div className="mt-4 grid gap-4">
+            <label className="text-sm">Sensitivity<select className="field mt-1" value={st.gain} onChange={e => update({ gain: +e.target.value })}>{GAINS.map((v, i) => <option key={v} value={v}>{i + 1} of 5{i === 2 ? " (recommended)" : i === 0 ? " (your exact target)" : i === 4 ? " (tiny movements count)" : ""}</option>)}</select></label>
+            <label className="text-sm">Gap size<select className="field mt-1" value={st.gap} onChange={e => update({ gap: +e.target.value })}><option value={250}>Wide</option><option value={290}>Extra wide (recommended)</option><option value={330}>Huge</option></select></label></div>}
           <button className="btn-primary mt-3 w-full" onClick={() => setView("hub")}>Done</button></Page>);
     }
 
@@ -630,9 +635,8 @@ export default function Flight() {
         <h1 className="mt-5 font-display text-4xl">Mirror Flight</h1>
         <p className="mt-2 text-navy/70">Make the expression shown on screen and your bird flies through the gaps.</p>
         {msg && <p role="alert" className="mt-3 rounded-2xl bg-lav/40 p-3 text-sm">{msg}</p>}
-        <div className="mt-5"><p className="text-sm text-navy/70">Game length</p>
-          <div className="mt-2 grid grid-cols-4 gap-2" role="radiogroup" aria-label="Game length">{LENS.map(v => <button key={v} role="radio" aria-checked={st.len === v} onClick={() => update({ len: v })} className={`min-h-[52px] rounded-2xl border ${st.len === v ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`}>{v}s</button>)}</div></div>
-        <button className="btn-primary mt-4 min-h-[64px] w-full text-xl" onClick={onPlay}>Play game</button>
+        
+        <button className="btn-primary mt-5 min-h-[64px] w-full text-xl" onClick={onPlay}>Play game</button>
         {!hasCal && <p className="mt-2 text-center text-xs text-navy/60">First time? We’ll set up your camera next.</p>}
         <div className="mt-3 grid grid-cols-2 gap-3"><button className="btn-quiet min-h-[56px]" onClick={openStats}>Stats</button><button className="btn-quiet min-h-[56px]" onClick={() => setView("custom")}>Customize</button></div>
         <button className="btn-quiet mt-3 w-full" onClick={() => setView("settings")}>Settings</button>
