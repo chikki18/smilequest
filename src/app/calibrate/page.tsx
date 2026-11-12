@@ -1,239 +1,193 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
-import { createTracker, type Frame } from "@/lib/tracking";
+import { createTracker, type Frame, type Vals } from "@/lib/tracking";
 import { POLICY_VERSION } from "@/lib/onboarding";
-import { loadContext, endSession, moveLabel } from "@/lib/workflow";
+import { loadContext, loadPlan, exerciseReady } from "@/lib/workflow";
 
-type Move = { threshold: number; range: number; detectable: boolean; nm: number };
-const KEYS = ["smile", "brow", "pucker", "close"] as const;
-type K = typeof KEYS[number];
-const NAMES: Record<K, string> = { smile: "Smile", brow: "Eyebrows", pucker: "Lip pucker", close: "Eye closure" };
-const PALETTES: Record<string, string[]> = { Garden: ["#e8a0b4", "#a9c8a0", "#f3d58a", "#b7a7dc"], Coast: ["#7fb7c4", "#a9d3d8", "#f2e2b8", "#e9a98f"], Dusk: ["#c8a6d9", "#8fa6d6", "#f3c09a", "#e7d3f0"] };
-const W = 450, H = 600, TAU = Math.PI * 2;
-const rgb = (h: string) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)).join(",");
-const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
-const fr_ = (x: number) => x - Math.floor(x);
+const MOVES = [
+  { k: "smile", label: "Gentle smile", hint: "Smile as comfortably as you can. Never force it.", min: 0.015, sides: ["liftL", "liftR"] },
+  { k: "brow", label: "Gentle eyebrow raise", hint: "Lift your eyebrows softly.", min: 0.015, sides: ["browL", "browR"] },
+  { k: "pucker", label: "Soft lip pucker", hint: "Gently round your lips, as if saying “oo”.", min: 0.08, sides: null },
+  { k: "close", label: "Gentle eye closure", hint: "Close your eyes softly, as if resting. No squeezing.", min: 0.08, sides: ["closeL", "closeR"] },
+] as const;
+type Key = typeof MOVES[number]["k"];
+type Move = { peak: number; range: number; threshold: number; detectable: boolean; sideDelta: number[] | null };
+const ALL = ["smile","brow","pucker","close","liftL","liftR","browL","browR","closeL","closeR"] as (keyof Vals)[];
+const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
+const sd = (a: number[]) => { const m = mean(a); return Math.sqrt(mean(a.map(x => (x - m) ** 2))); };
 
-function dab(c: CanvasRenderingContext2D, x: number, y: number, r: number, col: string, a: number, soft: number) {
-  const g = c.createRadialGradient(x, y, r * (1 - soft) * 0.6, x, y, r);
-  g.addColorStop(0, `rgba(${rgb(col)},${a})`); g.addColorStop(1, `rgba(${rgb(col)},0)`);
-  c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill();
-}
-function drawScene(c: CanvasRenderingContext2D) {
-  const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#bcd8e6"); g.addColorStop(.55, "#f6e9d0"); g.addColorStop(1, "#cfe0c0");
-  c.fillStyle = g; c.fillRect(0, 0, W, H);
-  c.fillStyle = "#f8d98a"; c.beginPath(); c.arc(W * .76, H * .17, W * .1, 0, TAU); c.fill();
-  [["#a9c7a0", .5, .62], ["#8fb58c", .8, .7], ["#6f9f7a", .3, .8]].forEach(([col, x, y]) => { c.fillStyle = col as string; c.beginPath(); c.ellipse(W * (x as number), H * (y as number), W * .6, H * .16, 0, 0, TAU); c.fill(); });
-  const cols = ["#e8a0b4", "#f3d58a", "#b7a7dc", "#f2b8a0"];
-  for (let i = 0; i < 34; i++) {
-    const x = fr_(i * .137 + .05) * W, y = H * (.58 + fr_(i * .311) * .38), s = 9 + fr_(i * .53) * 9;
-    c.strokeStyle = "#5f8a6e"; c.lineWidth = 3; c.beginPath(); c.moveTo(x, y); c.lineTo(x, y + H * .07); c.stroke();
-    c.fillStyle = cols[i % 4]; for (let k = 0; k < 6; k++) { c.beginPath(); c.arc(x + Math.cos(k * TAU / 6) * s, y + Math.sin(k * TAU / 6) * s, s * .7, 0, TAU); c.fill(); }
-    c.fillStyle = "#fff4c8"; c.beginPath(); c.arc(x, y, s * .5, 0, TAU); c.fill();
-  }
-}
-type Pot = { w: number; h: number; rim: number; spin: number };
-function drawPot(c: CanvasRenderingContext2D, p: Pot, glaze: number) {
-  const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#f8f1e4"); g.addColorStop(1, "#e6dcc8"); c.fillStyle = g; c.fillRect(0, 0, W, H);
-  const cx = W / 2, wy = H * .82;
-  c.fillStyle = "#b9b2a4"; c.beginPath(); c.ellipse(cx, wy + 18, W * .34, 26, 0, 0, TAU); c.fill();
-  c.fillStyle = "#d8d1c3"; c.beginPath(); c.ellipse(cx, wy, W * .34, 26, 0, 0, TAU); c.fill();
-  for (let i = 0; i < 10; i++) { const a = p.spin + i * TAU / 10; if (Math.sin(a) > 0) { c.fillStyle = "#a39b8b"; c.beginPath(); c.arc(cx + Math.cos(a) * W * .31, wy + Math.sin(a) * 23, 3, 0, TAU); c.fill(); } }
-  const vh = H * (.22 + .4 * p.h), base = W * (.12 + .2 * p.w), rimMul = .85 + .5 * p.rim;
-  const r = (t: number) => base * (.62 + .38 * Math.sin(Math.PI * (t * .85 + .08))) * (1 + (rimMul - 1) * clamp((t - .7) / .3, 0, 1));
-  const y = (t: number) => wy - t * vh, N = 40;
-  c.fillStyle = "rgba(0,0,0,.12)"; c.beginPath(); c.ellipse(cx, wy + 6, base * .8, 10, 0, 0, TAU); c.fill();
-  const gr = c.createLinearGradient(cx - base, 0, cx + base, 0);
-  gr.addColorStop(0, "#b9795a"); gr.addColorStop(.35, "#d9a07c"); gr.addColorStop(.7, "#c98a67"); gr.addColorStop(1, "#9c5f45");
-  c.fillStyle = gr; c.beginPath();
-  for (let i = 0; i <= N; i++) { const t = i / N; i ? c.lineTo(cx - r(t), y(t)) : c.moveTo(cx - r(t), y(t)); }
-  for (let i = N; i >= 0; i--) { const t = i / N; c.lineTo(cx + r(t), y(t)); }
-  c.closePath(); c.fill();
-  const line = (sx: number, col: string, w: number) => { c.strokeStyle = col; c.lineWidth = w; c.beginPath(); for (let i = 0; i <= N; i++) { const t = i / N; i ? c.lineTo(cx + sx * r(t), y(t)) : c.moveTo(cx + sx * r(t), y(t)); } c.stroke(); };
-  for (let j = 0; j < 6; j++) { const ph = (p.spin * .15 + j / 6) * TAU, co = Math.cos(ph); if (co > 0) line(Math.sin(ph), `rgba(255,255,255,${.08 * co})`, 2); }
-  line(-.45, `rgba(255,255,255,${.08 + .3 * glaze})`, 7);
-  c.fillStyle = "#7c4a37"; c.beginPath(); c.ellipse(cx, y(1), r(1), 11, 0, 0, TAU); c.fill();
-  c.fillStyle = "#5a3526"; c.beginPath(); c.ellipse(cx, y(1) + 1, r(1) * .86, 8, 0, 0, TAU); c.fill();
-}
+const nextUrl = () => { try { const n = new URLSearchParams(location.search).get("next"); return n && n.startsWith("/") && !n.startsWith("//") ? n : null; } catch { return null; } };
 
-export default function Studio() {
-  const video = useRef<HTMLVideoElement>(null), cvRef = useRef<HTMLCanvasElement>(null);
-  const stream = useRef<MediaStream | null>(null), tracker = useRef<Awaited<ReturnType<typeof createTracker>> | null>(null);
-  const latest = useRef<Frame | null>(null), paused = useRef(false), adjust = useRef(false);
-  const art = useRef<{ undo: () => void; reset: () => void; url: () => string } | null>(null);
-  const levs = useRef<Record<K, number>>({ smile: 0, brow: 0, pucker: 0, close: 0 }), sides = useRef({ L: 0, R: 0 });
-  const [phase, setPhase] = useState<"loading" | "nocal" | "pick" | "play">("loading");
-  const [cal, setCal] = useState<Partial<Record<K, Move>>>({}), [neutral, setNeutral] = useState<Record<string, { mean: number }>>({});
-  const [mode, setMode] = useState<"reveal" | "pottery">("reveal"), [palette, setPalette] = useState("Garden");
-  const [gain, setGain] = useState(1.3), [dir, setDir] = useState(1), [showSides, setShowSides] = useState(false), [preview, setPreview] = useState(true);
-  const [msg, setMsg] = useState<string | null>(null), [busy, setBusy] = useState(false);
-  const [ui, setUi] = useState({ lev: { smile: 0, brow: 0, pucker: 0, close: 0 } as Record<K, number>, adjust: false, paused: false, L: 0, R: 0 });
-  const sessId = useRef<string | null>(null), startedAt = useRef(Date.now()), saves = useRef(0);
-  const S = useRef({ mode, palette, gain, dir, cal, neutral }); S.current = { mode, palette, gain, dir, cal, neutral };
-
-  useEffect(() => { (async () => {
-    const { data: { user } } = await supabase().auth.getUser();
-    if (!user) { setMsg("Please log in on the home page first."); setPhase("nocal"); return; }
-    const ctx = await loadContext(); if (!ctx.session) { location.href = "/session"; return; }
-    sessId.current = ctx.session.id;
-    const { data } = await supabase().from("calibration_profiles").select("summary").order("created_at", { ascending: false }).limit(1).maybeSingle();
-    const m: Partial<Record<K, Move>> = {};
-    for (const k of KEYS) { const v = data?.summary?.moves?.[k]; if (v?.detectable && (!ctx.allowed || ctx.allowed.includes(k))) m[k] = { ...v, nm: v.threshold - 0.5 * v.range }; }
-    if (!Object.keys(m).length) { setMsg("None of your approved movements are calibrated yet. Set up your camera for them first."); setPhase("nocal"); return; }
-    setCal(m); setNeutral(data?.summary?.neutral ?? {}); setPhase("pick");
-  })(); return () => stop(); }, []);
-
-  function stop() { tracker.current?.stop(); tracker.current = null; stream.current?.getTracks().forEach(t => t.stop()); stream.current = null; latest.current = null; }
-  async function begin() {
-    setBusy(true); setMsg(null);
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
-      stream.current = s; s.getVideoTracks()[0].onended = () => { adjust.current = true; };
-      const v = video.current!; v.srcObject = s; await v.play();
-      tracker.current = await createTracker(v, f => { latest.current = f; });
-      const sb = supabase(); const { data: { user } } = await sb.auth.getUser();
-      if (user) await sb.from("consent_records").insert({ user_id: user.id, kind: "camera_processing", granted: true, policy_version: POLICY_VERSION });
-      paused.current = false; setPhase("play");
-    } catch (e: any) { stop(); setMsg(e?.name === "NotAllowedError" ? "Camera access is blocked. Allow it in your browser’s site settings, then try again." : `Couldn’t start the camera: ${e?.message ?? e}`); }
-    setBusy(false);
-  }
+export default function Calibrate() {
+  const video = useRef<HTMLVideoElement>(null);
+  const stream = useRef<MediaStream | null>(null);
+  const tracker = useRef<Awaited<ReturnType<typeof createTracker>> | null>(null);
+  const latest = useRef<Frame | null>(null);
+  const [f, setF] = useState<Frame | null>(null);
+  const [status, setStatus] = useState<"off" | "loading" | "on">("off");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [left, setLeft] = useState(0);
+  const [swap, setSwap] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [neutral, setNeutral] = useState<Record<string, { mean: number; std: number }> | null>(null);
+  const [moves, setMoves] = useState<Partial<Record<Key, Move>>>({});
+  const holds = useRef<Record<string, number | null>>({});
+  const model = useRef({ neutral, moves }); model.current = { neutral, moves };
+  const [, tick] = useState(0);
 
   useEffect(() => {
-    if (phase !== "play") return;
-    const mk = () => { const c = document.createElement("canvas"); c.width = W; c.height = H; return c; };
-    const ctxOf = (c: HTMLCanvasElement) => c.getContext("2d", { willReadFrequently: true })!;
-    const Sc = mk(), M = mk(), P = mk(), T = mk(), A = mk(), sc = ctxOf(Sc), mc = ctxOf(M), pc = ctxOf(P), tc = ctxOf(T), ac = ctxOf(A);
-    drawScene(sc);
-    const cv = cvRef.current!, ctx = cv.getContext("2d")!; cv.width = W; cv.height = H;
-    const snaps: { m: ImageData; p: ImageData }[] = [], potSnaps: Pot[] = [];
-    const pot: Pot = { w: .5, h: .5, rim: .3, spin: 0 }; let glaze = 0, dirty = true, lastSnap = 0, dotT = 0;
-    const br = { x: .5, y: .8, ph: 0 }, lev: Record<K, number> = { smile: 0, brow: 0, pucker: 0, close: 0 };
-    art.current = {
-      undo() { if (S.current.mode === "pottery") { const p = potSnaps.pop(); if (p) Object.assign(pot, p); } else { const s = snaps.pop(); if (s) { mc.putImageData(s.m, 0, 0); pc.putImageData(s.p, 0, 0); dirty = true; } } },
-      reset() { mc.clearRect(0, 0, W, H); pc.clearRect(0, 0, W, H); snaps.length = 0; potSnaps.length = 0; Object.assign(pot, { w: .5, h: .5, rim: .3 }); dirty = true; },
-      url() { return (S.current.mode === "pottery" ? cv : A).toDataURL("image/jpeg", .85); },
-    };
-    const snap = () => { snaps.push({ m: mc.getImageData(0, 0, W, H), p: pc.getImageData(0, 0, W, H) }); if (snaps.length > 8) snaps.shift(); };
-    let raf = 0, prev = performance.now(), lost: number | null = null;
-    const loop = (now: number) => {
-      raf = requestAnimationFrame(loop); const dt = Math.min(.1, (now - prev) / 1000); prev = now;
-      const s = S.current, f = latest.current, ok = !!(f?.vals && f.q.face && f.q.size);
-      if (!ok) { if (lost == null) lost = now; adjust.current = now - lost > 600; } else { lost = null; adjust.current = false; }
-      if (ok && !paused.current) {
-        for (const k of KEYS) { const m = s.cal[k]; let l = m ? clamp(s.gain * (f!.vals![k] - m.nm) / m.range, 0, 1) : 0; if (l < .1) l = 0; lev[k] += (l - lev[k]) * .25; }
-        levs.current = { ...lev };
-        const nl = s.neutral.liftL?.mean, nr = s.neutral.liftR?.mean, sr = s.cal.smile?.range;
-        if (nl != null && nr != null && sr) sides.current = { L: clamp((f!.vals!.liftL - nl) / sr, 0, 1), R: clamp((f!.vals!.liftR - nr) / sr, 0, 1) };
-        if (s.mode === "reveal") {
-          const pal = PALETTES[s.palette], avail = KEYS.filter(k => s.cal[k]);
-          const flowKey: K | undefined = s.cal.smile ? "smile" : avail[0], flow = flowKey ? lev[flowKey] : 0;
-          br.ph += dt * .32; br.x = .5 + .42 * Math.sin(br.ph);
-          const ty = s.cal.brow ? .88 - .74 * lev.brow : .5 + .35 * Math.sin(br.ph * .37); br.y += (ty - br.y) * .12;
-          const px = br.x * W, py = br.y * H, soft = .35 + .65 * lev.close;
-          if (flow > .08) {
-            if (now - lastSnap > 4000) { snap(); lastSnap = now; }
-            const r = 16 + flow * 38, a = (.05 + .2 * flow) * Math.min(2, dt * 60);
-            dab(mc, px, py, r, "#ffffff", a * 1.6, soft); dab(pc, px, py, r, pal[Math.floor(br.ph * .9) % pal.length], a * .9, soft); dirty = true;
-          }
-          if (s.cal.pucker && lev.pucker > .35) { dotT += dt; if (dotT > .14) { dotT = 0; if (now - lastSnap > 4000) { snap(); lastSnap = now; }
-            const col = pal[(Math.floor(br.ph * 2) + 2) % pal.length];
-            for (let i = 0; i < 5; i++) { const an = i * TAU / 5 + br.ph; dab(pc, px + Math.cos(an) * 7, py + Math.sin(an) * 7, 6, col, .55, .2); dab(mc, px + Math.cos(an) * 7, py + Math.sin(an) * 7, 8, "#ffffff", .9, .3); }
-            dab(pc, px, py, 3 + lev.pucker * 3, "#f3d58a", .8, .1); dirty = true; } }
-        } else {
-          pot.spin += dt * .5;
-          if (Math.max(lev.smile, lev.brow, lev.pucker) > .12) {   // relaxed face = no change (stabilises)
-            if (now - lastSnap > 4000) { potSnaps.push({ ...pot }); if (potSnaps.length > 8) potSnaps.shift(); lastSnap = now; }
-            pot.w = clamp(pot.w + s.dir * .1 * dt * lev.smile, .15, 1); pot.h = clamp(pot.h + s.dir * .08 * dt * lev.brow, .2, 1); pot.rim = clamp(pot.rim + s.dir * .12 * dt * lev.pucker, 0, 1);
-          }
-          glaze += (lev.close - glaze) * .1;
-        }
-      } else if (S.current.mode === "pottery" && !paused.current) pot.spin += dt * .5;
-      if (s.mode === "pottery") drawPot(ctx, pot, glaze);
-      else {
-        if (dirty) {
-          ac.globalCompositeOperation = "source-over"; ac.fillStyle = "#fffdf8"; ac.fillRect(0, 0, W, H);
-          ac.globalAlpha = .07; ac.drawImage(Sc, 0, 0); ac.globalAlpha = 1;
-          tc.globalCompositeOperation = "source-over"; tc.clearRect(0, 0, W, H); tc.drawImage(Sc, 0, 0); tc.globalCompositeOperation = "destination-in"; tc.drawImage(M, 0, 0); tc.globalCompositeOperation = "source-over";
-          ac.drawImage(T, 0, 0); ac.globalCompositeOperation = "multiply"; ac.drawImage(P, 0, 0); ac.globalCompositeOperation = "source-over"; dirty = false;
-        }
-        ctx.drawImage(A, 0, 0); ctx.strokeStyle = "rgba(27,42,58,.35)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(br.x * W, br.y * H, 10, 0, TAU); ctx.stroke();
+    const id = setInterval(() => {
+      const fr = latest.current; setF(fr);
+      const { neutral: n, moves: m } = model.current;
+      for (const mv of MOVES) {
+        const c = m[mv.k]; if (!n || !c || !c.detectable || !fr?.vals) { holds.current[mv.k] = null; continue; }
+        const above = fr.vals[mv.k] >= c.threshold;
+        if (above && holds.current[mv.k] == null) holds.current[mv.k] = Date.now();
+        if (!above) holds.current[mv.k] = null;
       }
-    };
-    raf = requestAnimationFrame(loop);
-    const id = setInterval(() => setUi({ lev: { ...levs.current }, adjust: adjust.current, paused: paused.current, L: sides.current.L, R: sides.current.R }), 120);
-    return () => { cancelAnimationFrame(raf); clearInterval(id); art.current = null; };
-  }, [phase, mode]);
+      tick(x => x + 1);
+    }, 100);
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => () => stop(), []);
+  const [allowed, setAllowed] = useState<string[] | null>(null), [freePlay, setFreePlay] = useState(false);
+  useEffect(() => { (async () => {
+    const ctx = await loadContext();
+    if (ctx.session) { setAllowed(ctx.allowed); setFreePlay(ctx.allowed === null); return; }
+    const p = await loadPlan();
+    if (p && exerciseReady(p)) setAllowed(p.authorized_movements); else setFreePlay(true);
+  })(); }, []);
+  useEffect(() => { tracker.current?.setSwap(swap); }, [swap]);
 
+  async function start() {
+    setMsg(null); setStatus("loading");
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+      stream.current = s;
+      s.getVideoTracks()[0].onended = () => { stop(); setMsg("The camera was interrupted. Tap Start camera to resume."); };
+      const v = video.current!; v.srcObject = s; await v.play();
+      tracker.current = await createTracker(v, fr => { latest.current = fr; });
+      tracker.current.setSwap(swap);
+      setStatus("on");
+      const sb = supabase(); const { data: { user } } = await sb.auth.getUser();
+      if (user) await sb.from("consent_records").insert({ user_id: user.id, kind: "camera_processing", granted: true, policy_version: POLICY_VERSION });
+    } catch (e: any) {
+      stop();
+      setMsg(e?.name === "NotAllowedError" ? "Camera access is blocked. Allow it in your browser’s site settings (the lock icon by the address), then try again." : `Couldn’t start camera tracking: ${e?.message ?? e}`);
+    }
+  }
+  function stop() {
+    tracker.current?.stop(); tracker.current = null;
+    stream.current?.getTracks().forEach(t => t.stop()); stream.current = null;
+    latest.current = null; setStatus("off");
+  }
+
+  async function grab(secs: number, label: string) {
+    setBusy(label); setMsg(null);
+    const s: Vals[] = []; const end = Date.now() + secs * 1000;
+    await new Promise<void>(res => { const id = setInterval(() => {
+      const fr = latest.current; setLeft(Math.max(0, Math.ceil((end - Date.now()) / 1000)));
+      if (fr?.vals && fr.q.face && fr.q.size) s.push(fr.vals);
+      if (Date.now() >= end) { clearInterval(id); res(); } }, 50); });
+    setBusy(null);
+    if (s.length < 25) { setMsg("Let’s adjust your camera. We couldn’t see your face clearly, so nothing was recorded. Try more light and center your face."); return null; }
+    return s;
+  }
+  async function doNeutral() {
+    const s = await grab(3, "neutral"); if (!s) return;
+    const n: Record<string, { mean: number; std: number }> = {};
+    for (const k of ALL) { const a = s.map(x => x[k]); n[k] = { mean: mean(a), std: sd(a) }; }
+    setNeutral(n); setMoves({});
+  }
+  async function doMove(mv: typeof MOVES[number]) {
+    if (!neutral) return;
+    const s = await grab(4, mv.k); if (!s) return;
+    const top = [...s].sort((a, b) => b[mv.k] - a[mv.k]).slice(0, Math.max(5, Math.floor(s.length / 4)));
+    const peak = mean(top.map(x => x[mv.k])), nm = neutral[mv.k];
+    const range = peak - nm.mean;
+    const detectable = range > Math.max(3 * nm.std, mv.min);
+    const sideDelta = mv.sides ? mv.sides.map(k => mean(top.map(x => x[k])) - neutral[k].mean) : null;
+    setMoves(m => ({ ...m, [mv.k]: { peak, range, threshold: nm.mean + 0.5 * range, detectable, sideDelta } }));
+  }
   async function save() {
-    setMsg(null); const { data: { user } } = await supabase().auth.getUser();
-    if (!user || !art.current) { setMsg("Please log in to save."); return; }
-    const { error } = await supabase().from("saved_artwork").insert({ user_id: user.id, mode, title: `${mode === "reveal" ? "Watercolor" : "Pottery"} · ${new Date().toLocaleDateString()}`, image_data: art.current.url() });
-    if (!error) saves.current++;
-    setMsg(error ? `Couldn’t save: ${error.message}` : "Saved to your gallery.");
+    setSaving(true); setSaveMsg(null); setSaved(false);
+    try {
+      const sb = supabase(); const { data: { user } } = await sb.auth.getUser();
+      if (!user) { setSaveMsg("You’re not logged in, so there’s nowhere to save. Go to the home page, log in, then come back to /calibrate."); setSaving(false); return; }
+      const { error } = await sb.from("calibration_profiles").insert({ user_id: user.id, summary: { version: 1, neutral, moves, swapLR: swap,
+        note: "Camera-derived estimates in face-size-normalised units; not clinical measurements." } });
+      if (error) setSaveMsg(`Couldn’t save: ${error.message}`);
+      else { setSaved(true); stop(); const n = nextUrl(); if (n) setTimeout(() => { location.href = n; }, 1500); }
+    } catch (e: any) { setSaveMsg(`Couldn’t save: ${e?.message ?? e}`); }
+    setSaving(false);
   }
-  async function finishSession() {
-    if (!sessId.current) return; const secs = (Date.now() - startedAt.current) / 1000;
-    const ok = await endSession(sessId.current, "canvas", secs, { mode_used: mode === "reveal" ? "Watercolor Reveal" : "Pottery & Sculpture", artworks_saved: saves.current, movements: KEYS.filter(k => cal[k]).map(k => moveLabel(k)) });
-    if (!ok) { setMsg("Couldn’t save your session. Please try again."); return; }
-    stop(); location.href = "/summary";
-  }
-  function download() { if (!art.current) return; const a = document.createElement("a"); a.href = art.current.url(); a.download = `smilequest-${mode}.jpg`; a.click(); }
 
-  const videoEl = <video ref={video} playsInline muted aria-label="Your camera preview (mirrored)"
-    className={phase === "play" && preview ? "fixed right-3 top-3 z-40 h-20 w-28 -scale-x-100 rounded-2xl object-cover shadow-soft" : "pointer-events-none fixed h-px w-px opacity-0"} />;
-  const body = () => {
-    if (phase === "loading") return <main className="grid min-h-dvh place-items-center text-navy/60">Loading…</main>;
-    if (phase === "nocal") return (<main className="mx-auto max-w-md px-6 pt-24"><h1 className="font-display text-3xl">Let’s set up your camera first.</h1>
-      <p className="mt-4 text-navy/70">{msg ?? "The studio uses your saved calibration so it fits your own comfortable movements."}</p>
-      <a className="btn-primary mt-8 inline-flex w-full items-center justify-center" href="/calibrate">Go to camera setup</a></main>);
-    if (phase === "pick") return (
-      <main className="mx-auto max-w-md px-6 pb-12 pt-[max(2rem,env(safe-area-inset-top))]">
-        <h1 className="font-display text-3xl">Living Portrait &amp; Canvas</h1>
-        <p className="mt-3 text-navy/70">A calm studio where gentle movements make art. No timers, no scores, nothing to get wrong. Only use movements your clinician has approved.</p>
-        <div className="mt-6 grid gap-3" role="radiogroup" aria-label="Choose a mode">
-          {([["reveal", "🎨 Watercolor Reveal", "Smile paints, eyebrows move the brush, lip pucker adds petals, soft eye closure blends."], ["pottery", "🏺 Pottery & Sculpture", "Smile widens, eyebrows raise, lip pucker refines the rim. A relaxed face keeps the shape."]] as const).map(([k, t, d]) => (
-            <button key={k} role="radio" aria-checked={mode === k} onClick={() => setMode(k)} className={`rounded-2xl border p-4 text-left ${mode === k ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`}><b>{t}</b><br /><span className="text-sm text-navy/70">{d}</span></button>))}</div>
-        <p className="mt-4 text-sm text-navy/70">Movements ready from your calibration: {KEYS.filter(k => cal[k]).map(k => NAMES[k]).join(", ")}.</p>
-        <p className="mt-2 text-xs text-navy/60">Your camera is processed on this device. Video is never uploaded or saved.</p>
-        {msg && <p role="alert" className="mt-3 rounded-2xl bg-lav/40 p-3 text-sm">{msg}</p>}
-        <button className="btn-primary mt-5 w-full" disabled={busy} onClick={begin}>{busy ? "Starting camera…" : "Start camera and create"}</button>
-      </main>);
-    return (
-      <main className="mx-auto max-w-md px-4 pb-16 pt-[max(1rem,env(safe-area-inset-top))]">
-        <div className="relative overflow-hidden rounded-3xl shadow-soft">
-          <canvas ref={cvRef} className="block w-full" style={{ aspectRatio: `${W}/${H}` }} aria-label={mode === "reveal" ? "Watercolor canvas painted by your facial movements" : "Pottery wheel shaped by your facial movements"} />
-          {(ui.adjust || ui.paused) && <div className="absolute inset-0 grid place-items-center bg-navy/55 p-6 text-center text-ivory" role="alert"><div>
-            <p className="font-display text-2xl">{ui.paused ? "Paused" : "Let’s adjust your camera"}</p>
-            <p className="mt-2 text-sm">{ui.paused ? "Take as long as you like." : "We can’t see your face clearly. Center it and add light. Nothing is lost."}</p>
-            {ui.paused && <button className="btn-primary mt-4" onClick={() => { paused.current = false; }}>Resume</button>}</div></div>}
-        </div>
-        <div className="mt-3 grid gap-1.5" aria-label="Your movements right now">{KEYS.filter(k => cal[k]).map(k => (
-          <div key={k} className="flex items-center gap-2 text-xs"><span className="w-20 text-navy/70">{NAMES[k]}</span>
-            <div className="h-2 flex-1 rounded-full bg-mist"><div className="h-2 rounded-full bg-teal transition-[width] duration-100" style={{ width: `${ui.lev[k] * 100}%` }} /></div></div>))}
-          {mode === "pottery" && Math.max(ui.lev.smile, ui.lev.brow, ui.lev.pucker) < .12 && <p className="text-xs text-navy/60">Relaxed. Your shape is staying just as it is.</p>}
-        </div>
-        {showSides && cal.smile && <div className="mt-3 rounded-2xl bg-lav/30 p-3 text-xs"><p className="mb-1 text-navy/60">Left and right smile movement (camera estimate, just for curiosity)</p>
-          {([["Left", ui.L], ["Right", ui.R]] as const).map(([n, v]) => <div key={n} className="mt-1 flex items-center gap-2"><span className="w-10">{n}</span><div className="h-2 flex-1 rounded-full bg-mist"><div className="h-2 rounded-full bg-lav" style={{ width: `${v * 100}%` }} /></div></div>)}</div>}
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          <button className="btn-quiet min-h-[48px] px-2" onClick={() => { paused.current = true; }}>Pause</button>
-          <button className="btn-quiet min-h-[48px] px-2" onClick={() => art.current?.undo()}>Undo</button>
-          <button className="btn-quiet min-h-[48px] px-2" onClick={() => art.current?.reset()}>Start over</button>
-          <button className="btn-primary col-span-2 min-h-[48px] px-2" onClick={save}>Save to gallery</button>
-          <button className="btn-quiet min-h-[48px] px-2" onClick={download}>Download</button></div>
-        {msg && <p role="status" className="mt-3 rounded-2xl bg-lav/40 p-3 text-sm">{msg}</p>}
-        <div className="mt-5 grid gap-3 rounded-3xl bg-paper p-4 text-sm shadow-soft">
-          <label>Sensitivity (higher = responds to smaller movements)<input type="range" min={0.6} max={2.2} step={0.1} value={gain} onChange={e => setGain(+e.target.value)} className="mt-1 w-full accent-teal" /></label>
-          {mode === "reveal" && <label>Colors<select className="field mt-1" value={palette} onChange={e => setPalette(e.target.value)}>{Object.keys(PALETTES).map(p => <option key={p}>{p}</option>)}</select></label>}
-          {mode === "pottery" && <label>Shaping direction<select className="field mt-1" value={dir} onChange={e => setDir(+e.target.value)}><option value={1}>Grow (widen, raise, open)</option><option value={-1}>Soften (narrow, lower, close)</option></select></label>}
-          <label className="flex items-center gap-3"><input type="checkbox" className="h-5 w-5 accent-teal" checked={showSides} onChange={e => setShowSides(e.target.checked)} />Show left/right movement</label>
-          <label className="flex items-center gap-3"><input type="checkbox" className="h-5 w-5 accent-teal" checked={preview} onChange={e => setPreview(e.target.checked)} />Show camera preview</label>
-        </div>
-        <div className="mt-4 flex gap-2">
-          <button className="btn-quiet min-h-[48px] flex-1" onClick={() => { stop(); setPhase("pick"); }}>Rest / change mode</button>
-          <button className="btn-primary min-h-[48px] flex-1" onClick={finishSession}>Finish session</button>
-          <a className="btn-quiet inline-flex min-h-[48px] flex-1 items-center justify-center" href="/gallery" onClick={stop}>Gallery</a></div>
-      </main>);
-  };
-  return <>{videoEl}{body()}</>;
+  const q = f?.q; const ok = !!(q?.face && q.size && q.light);
+  const Badge = ({ good, text }: { good: boolean; text: string }) =>
+    <span className={`rounded-full px-3 py-1 text-xs ${good ? "bg-sage/40" : "bg-gold/30"}`}>{text}</span>;
+
+  if (saved) return (
+    <main className="mx-auto max-w-md px-6 pt-24">
+      <h1 className="font-display text-3xl">Calibration saved.</h1>
+      <p className="mt-4 text-navy/70">Your personal movement targets are saved to your account. No images were stored, and the camera is now off.</p>
+      <a href={nextUrl() ?? "/dashboard"} className="btn-primary mt-8 inline-flex w-full items-center justify-center">{nextUrl() ? "Continue to Mirror Flight" : "Back to dashboard"}</a>
+      <button className="btn-quiet mt-3 w-full" onClick={() => { setSaved(false); }}>Recalibrate</button>
+    </main>
+  );
+
+  return (
+    <main className="mx-auto max-w-md px-6 pb-16 pt-[max(2rem,env(safe-area-inset-top))]">
+      <h1 className="font-display text-3xl">Camera setup</h1>
+      <p className="mt-2 text-sm text-navy/70">Your camera is processed on this device. Video is never uploaded or saved. Move only as comfortably as feels right, and stop any time.</p>
+
+      <div className="relative mt-5 aspect-[4/3] overflow-hidden rounded-3xl bg-navy/90 shadow-soft">
+        <video ref={video} playsInline muted className="h-full w-full -scale-x-100 object-cover" aria-label="Your camera preview (mirrored)" />
+        {status === "on" && !ok && <div className="absolute inset-x-3 bottom-3 rounded-2xl bg-paper/95 p-3 text-sm" role="status">Let’s adjust your camera: {!q?.face ? "we can’t see your face yet." : !q.size ? "move closer or center your face." : "try a brighter, even light."}</div>}
+        {status !== "on" && <div className="absolute inset-0 grid place-items-center p-6 text-center text-ivory/80">{status === "loading" ? "Starting camera…" : "Camera is off"}</div>}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2" aria-live="polite">
+        <Badge good={!!q?.face} text={q?.face ? "Face visible" : "No face"} />
+        <Badge good={!!q?.size} text="Distance" /><Badge good={!!q?.light} text="Lighting" />
+        <span className="rounded-full bg-mist px-3 py-1 text-xs">{q?.fps ?? 0} fps</span>
+      </div>
+
+      <div className="mt-4 grid gap-3">
+        {status === "off" ? <button className="btn-primary" onClick={start}>Start camera</button>
+          : <button className="btn-quiet" onClick={stop}>Stop camera</button>}
+        <label className="flex items-center gap-3 text-sm text-navy/70"><input type="checkbox" className="h-5 w-5 accent-teal" checked={swap} onChange={e => setSwap(e.target.checked)} />Swap left/right for eye closure (use if closing your LEFT eye lights the Right bar)</label>
+        {msg && <p role="alert" className="rounded-2xl bg-lav/40 p-3 text-sm">{msg}</p>}
+      </div>
+
+      {status === "on" && <section className="mt-8">
+        <h2 className="font-display text-xl">1. Relaxed face</h2>
+        <p className="mt-1 text-sm text-navy/70">Look at the camera comfortably with a relaxed face for 3 seconds.</p>
+        <button className="btn-primary mt-3 w-full" disabled={!!busy || !ok} onClick={doNeutral}>{busy === "neutral" ? `Hold still… ${left}` : neutral ? "Redo relaxed face ✓" : "Record relaxed face"}</button>
+
+        {neutral && <>
+          <h2 className="mt-8 font-display text-xl">2. Your comfortable movements</h2>
+          <p className="mt-1 text-sm text-navy/70">{freePlay ? "Your plan doesn’t confirm clinician-approved movements yet, so this is free-play setup. Only try movements you’re comfortable with." : "Showing only the movements in your plan."} Skip any you don’t want to do.</p>
+          <div className="mt-3 grid gap-3">{MOVES.filter(mv => !allowed || allowed.includes(mv.k)).map(mv => { const c = moves[mv.k]; return (
+            <div key={mv.k} className="rounded-3xl bg-paper p-4 shadow-soft">
+              <div className="font-medium">{mv.label}</div><p className="text-sm text-navy/60">{mv.hint}</p>
+              <button className="btn-quiet mt-3 w-full" disabled={!!busy || !ok} onClick={() => doMove(mv)}>{busy === mv.k ? `Move gently… ${left}` : c ? "Redo" : "Record 4 seconds"}</button>
+              {c && !c.detectable && <p className="mt-2 text-sm">We couldn’t detect a reliable change for this one. That’s okay. Your clinician can suggest an alternative.</p>}
+              {c?.detectable && neutral && f?.vals && <div className="mt-3">
+                <div className="relative h-3 rounded-full bg-mist"><div className="h-3 rounded-full bg-teal transition-[width]" style={{ width: `${Math.min(100, Math.max(0, (f.vals[mv.k] - neutral[mv.k].mean) / c.range * 100))}%` }} /><div className="absolute top-[-3px] h-[18px] w-0.5 bg-navy/60" style={{ left: "50%" }} /></div>
+                <div className="mt-1 flex justify-between text-xs text-navy/60"><span>rest</span><span>your target (|)</span><span>your comfortable max</span></div>
+                <div className="mt-1 text-sm">{holds.current[mv.k] ? `Holding: ${((Date.now() - holds.current[mv.k]!) / 1000).toFixed(1)} s` : "Resting"}</div>
+                {c.sideDelta && <div className="mt-1 text-xs text-navy/60">Left {c.sideDelta[0].toFixed(3)} · Right {c.sideDelta[1].toFixed(3)} (camera-derived estimates, unvalidated)</div>}
+              </div>}
+            </div>); })}</div>
+          {!Object.values(moves).some(m => m?.detectable) && <p className="mt-6 text-sm text-navy/70">Record at least one movement above (with a clear change) to unlock saving.</p>}
+          <button className="btn-primary mt-4 w-full" disabled={saving || saved || !Object.values(moves).some(m => m?.detectable)} onClick={save}>{saving ? "Saving…" : saved ? "Saved ✓" : "Save calibration"}</button>
+          {saveMsg && <p role="alert" className="mt-3 rounded-2xl bg-lav/40 p-3 text-sm">{saveMsg}</p>}
+        </>}
+      </section>}
+    </main>
+  );
 }
