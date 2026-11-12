@@ -18,13 +18,14 @@ const GAINS = [1, 1.3, 1.7, 2.2, 3];
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const r1 = (v: number) => Math.round(v * 10) / 10;
 
-type Settings = { auto: boolean; exprs: K[]; secs: number; gain: number; gap: number; pace: number };
-const AUTO: Settings = { auto: true, exprs: [...KEYS], secs: 20, gain: 1.7, gap: 290, pace: 75 };
+const LENS = [30, 40, 60, 80];
+type Settings = { auto: boolean; exprs: K[]; len: number; gain: number; gap: number; pace: number };
+const AUTO: Settings = { auto: true, exprs: [...KEYS], len: 80, gain: 1.7, gap: 290, pace: 75 };
 const SKEY = "smilequest.flight.settings";
 const loadSettings = (): Settings => {
   try { const raw = localStorage.getItem(SKEY); if (raw) { const j = JSON.parse(raw);
     const ex = Array.isArray(j.exprs) ? j.exprs.filter((x: string) => (KEYS as readonly string[]).includes(x)) : AUTO.exprs;
-    return { ...AUTO, ...j, exprs: ex.length ? ex : AUTO.exprs }; } } catch { /* ignore */ }
+    return { ...AUTO, ...j, exprs: ex.length ? ex : AUTO.exprs, len: LENS.includes(j.len) ? j.len : AUTO.len }; } } catch { /* ignore */ }
   return AUTO;
 };
 const saveSettings = (s: Settings) => { try { localStorage.setItem(SKEY, JSON.stringify(s)); } catch { /* ignore */ } };
@@ -156,7 +157,7 @@ const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
 const sd = (a: number[]) => { const m = mean(a); return Math.sqrt(mean(a.map(x => (x - m) ** 2))); };
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
-const TOTAL_NOTE = (n: number, secs: number) => { const t = n * secs; return `${n} expression${n === 1 ? "" : "s"} × ${secs} s = about ${Math.floor(t / 60)} min${t % 60 ? ` ${t % 60} s` : ""}`; };
+const PER = (n: number, len: number) => `${n} expression${n === 1 ? "" : "s"}, about ${Math.round(len / n * 10) / 10} seconds each`;
 function dayStreak(games: GameRow[]) {
   const days = new Set(games.map(x => new Date(x.played_at).toDateString()));
   let n = 0; const d = new Date(); if (!days.has(d.toDateString())) d.setDate(d.getDate() - 1);
@@ -321,9 +322,9 @@ export default function Flight() {
       const v = video.current!; v.srcObject = s; await v.play();
       tracker.current = await createTracker(v, f => { latest.current = f; });
       const wh = clamp(Math.round(W * innerHeight / innerWidth), 560, 800), sc = Math.min(innerWidth / W, innerHeight / wh);
-      cfg.current = { secs: eff.secs, gap: eff.gap, pace: eff.pace, auto: st.auto }; liveGain.current = eff.gain; setGainUi(eff.gain);
+      cfg.current = { secs: st.len / plan.length, gap: eff.gap, pace: eff.pace, auto: st.auto }; liveGain.current = eff.gain; setGainUi(eff.gain);
       g.current = fresh(plan, wh); setBox({ w: W * sc, h: wh * sc });
-      setUi({ stage: "ready", si: 0, total: plan.length, ready: 6, left: eff.secs, adjust: false, paused: false, k: plan[0] }); setView("play");
+      setUi({ stage: "ready", si: 0, total: plan.length, ready: 6, left: Math.ceil(st.len / plan.length), adjust: false, paused: false, k: plan[0] }); setView("play");
     } catch (e: any) { stop(); setMsg(e?.name === "NotAllowedError" ? "Camera access is blocked. Allow it in your browser’s site settings, then try again." : `Couldn’t start the camera: ${e?.message ?? e}`); setView("hub"); }
     setBusy(false);
   }
@@ -511,17 +512,19 @@ export default function Flight() {
           <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">1. Calibrate</h2>
             <p className="mt-1 text-sm text-navy/70">{hasCal ? `Ready: ${KEYS.filter(k => cal[k]).map(k => EXPR[k].name).join(", ")}.` : "Not set up yet. Calibrating teaches the game your own comfortable movements."}</p>
             <button className="btn-primary mt-3 w-full" onClick={() => openCalibrate("settings")}>{hasCal ? "Recalibrate" : "Calibrate"}</button></section>
-          <h2 className="mt-6 font-display text-xl">2. Game settings</h2>
+          <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">2. Game length</h2>
+            <div className="mt-3 grid grid-cols-4 gap-2" role="radiogroup" aria-label="Game length">{LENS.map(v => <button key={v} role="radio" aria-checked={st.len === v} onClick={() => update({ len: v })} className={`min-h-[56px] rounded-2xl border ${st.len === v ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`}>{v}s</button>)}</div>
+            <p className="mt-2 text-xs text-navy/60">Play time only. The short get-ready breaks between expressions are extra.</p></section>
+          <h2 className="mt-6 font-display text-xl">3. Game settings</h2>
           <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>Automatic settings</b><br /><span className="text-sm text-navy/60">Recommended. Picks everything for you.</span></span>
             <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.auto} onChange={e => update({ auto: e.target.checked })} aria-label="Automatic settings" /></label>
           {st.auto ? <div className="mt-4 rounded-3xl bg-sage/30 p-5 text-sm"><p>All four expressions, in order: gentle smile, eyebrow raise, lip pucker, gentle eye closure.</p>
-            <p className="mt-2">20 seconds each. Before each one you get a big picture and a few seconds to get ready.</p><p className="mt-2">{TOTAL_NOTE(KEYS.filter(k => cal[k]).length || 4, 20)}, plus short get-ready breaks.</p></div>
+            <p className="mt-2">{PER(KEYS.filter(k => cal[k]).length || 4, st.len)}. Before each one you get a big picture and a few seconds to get ready.</p></div>
           : <div className="mt-4 grid gap-4">
             <div><h2 className="font-display text-xl">Expressions</h2><div className="mt-2 grid gap-2">{KEYS.map(k => (
               <button key={k} role="checkbox" aria-checked={n.exprs.includes(k)} disabled={!cal[k]} onClick={() => { const has = n.exprs.includes(k); const nx = has ? n.exprs.filter(x => x !== k) : KEYS.filter(x => n.exprs.includes(x) || x === k); if (nx.length) update({ exprs: nx as K[] }); }}
                 className={`flex min-h-[64px] items-center gap-3 rounded-2xl border px-3 text-left ${n.exprs.includes(k) ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"} disabled:opacity-40`}><FaceArt k={k} size={44} /><span>{EXPR[k].name}{!cal[k] && <span className="block text-xs text-navy/60">Not calibrated</span>}</span></button>))}</div></div>
-            <div><h2 className="font-display text-xl">Seconds for each</h2><div className="mt-2 grid grid-cols-4 gap-2">{[10, 15, 20, 30].map(v => <button key={v} aria-pressed={n.secs === v} onClick={() => update({ secs: v })} className={`min-h-[52px] rounded-2xl border ${n.secs === v ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`}>{v}</button>)}</div>
-              <p className="mt-2 text-xs text-navy/60">{TOTAL_NOTE(n.exprs.filter(k => cal[k]).length, n.secs)}</p></div>
+            <p className="text-xs text-navy/60">{PER(Math.max(1, n.exprs.filter(k => cal[k]).length), st.len)}.</p>
             <label className="text-sm">Sensitivity<select className="field mt-1" value={n.gain} onChange={e => update({ gain: +e.target.value })}>{GAINS.map((v, i) => <option key={v} value={v}>{i + 1} of 5{i === 2 ? " (recommended)" : i === 0 ? " (your exact target)" : i === 4 ? " (tiny movements count)" : ""}</option>)}</select></label>
             <label className="text-sm">Gap size<select className="field mt-1" value={n.gap} onChange={e => update({ gap: +e.target.value })}><option value={250}>Wide</option><option value={290}>Extra wide (recommended)</option><option value={330}>Huge</option></select></label>
             <label className="text-sm">Pace<select className="field mt-1" value={n.pace} onChange={e => update({ pace: +e.target.value })}><option value={60}>Very slow</option><option value={75}>Slow (recommended)</option><option value={100}>Normal</option></select></label></div>}
@@ -627,10 +630,12 @@ export default function Flight() {
         <h1 className="mt-5 font-display text-4xl">Mirror Flight</h1>
         <p className="mt-2 text-navy/70">Make the expression shown on screen and your bird flies through the gaps.</p>
         {msg && <p role="alert" className="mt-3 rounded-2xl bg-lav/40 p-3 text-sm">{msg}</p>}
-        <button className="btn-primary mt-5 min-h-[64px] w-full text-xl" onClick={onPlay}>Play game</button>
+        <div className="mt-5"><p className="text-sm text-navy/70">Game length</p>
+          <div className="mt-2 grid grid-cols-4 gap-2" role="radiogroup" aria-label="Game length">{LENS.map(v => <button key={v} role="radio" aria-checked={st.len === v} onClick={() => update({ len: v })} className={`min-h-[52px] rounded-2xl border ${st.len === v ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`}>{v}s</button>)}</div></div>
+        <button className="btn-primary mt-4 min-h-[64px] w-full text-xl" onClick={onPlay}>Play game</button>
         {!hasCal && <p className="mt-2 text-center text-xs text-navy/60">First time? We’ll set up your camera next.</p>}
         <div className="mt-3 grid grid-cols-2 gap-3"><button className="btn-quiet min-h-[56px]" onClick={openStats}>Stats</button><button className="btn-quiet min-h-[56px]" onClick={() => setView("custom")}>Customize</button></div>
-        <button className="btn-quiet mt-3 w-full" onClick={() => setView("settings")}>Settings · {st.auto ? "Automatic" : "Custom"}</button>
+        <button className="btn-quiet mt-3 w-full" onClick={() => setView("settings")}>Settings</button>
         {ios && <p className="mt-6 rounded-2xl bg-lav/30 p-4 text-xs text-navy/70">For the full-screen version on iPhone: tap the Share button in Safari, choose <b>Add to Home Screen</b>, then open SmileQuest from your home screen.</p>}
       </Page>);
   };
