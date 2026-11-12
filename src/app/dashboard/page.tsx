@@ -60,7 +60,11 @@ function TestHome() {
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))] text-center">
       <svg viewBox="0 0 240 130" className="w-full rounded-3xl shadow-soft" aria-hidden><rect width="240" height="130" fill="#62c3ee" /><rect x="170" y="0" width="30" height="44" fill="#79c08c" stroke="#35604a" strokeWidth="3" /><rect x="170" y="88" width="30" height="42" fill="#79c08c" stroke="#35604a" strokeWidth="3" />
         <ellipse cx="80" cy="66" rx="26" ry="23" fill="#6bb3a8" stroke="#2b3340" strokeWidth="3" /><circle cx="90" cy="59" r="6" fill="#fff" stroke="#2b3340" strokeWidth="2" /><circle cx="92" cy="59" r="3" fill="#2b3340" /><path d="M104 66 L120 71 L104 76Z" fill="#f29e4c" stroke="#2b3340" strokeWidth="2" /><circle cx="185" cy="66" r="9" fill="#f6c945" stroke="#a67c12" strokeWidth="2" /></svg>
-      <a href="/flyer" className="btn-primary mt-8 inline-flex min-h-[72px] w-full items-center justify-center text-2xl">Play Mirror Flight</a>
+      <h1 className="mt-8 font-display text-3xl">Pick a game</h1>
+      <a href="/flyer" className="btn-primary mt-5 inline-flex min-h-[72px] w-full items-center justify-center text-2xl">Mirror Flight</a>
+      <p className="mt-1 text-sm text-navy/60">Gentle, steady. Fly through the gaps.</p>
+      <a href="/dash" className="btn-primary mt-5 inline-flex min-h-[72px] w-full items-center justify-center text-2xl">Mirror Dash</a>
+      <p className="mt-1 text-sm text-navy/60">Fast and challenging. Run, jump, duck and fly.</p>
       <button className="mt-8 text-sm text-navy/60 underline" onClick={logout}>Log out</button>
     </main>);
 }
