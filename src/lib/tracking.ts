@@ -1,7 +1,7 @@
 // Reusable face tracking engine (MediaPipe Face Landmarker). Runs on-device; no video is uploaded or stored.
 export type Vals = { smile:number; brow:number; pucker:number; close:number; liftL:number; liftR:number; browL:number; browR:number; closeL:number; closeR:number; frown:number; sideA:number; sideB:number };
 export type Quality = { face:boolean; size:boolean; light:boolean; fps:number };
-export type Frame = { t:number; vals:Vals|null; q:Quality };
+export type Frame = { t:number; vals:Vals|null; q:Quality; pos?:{ x:number; y:number; s:number } };
 const V = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
 
@@ -23,8 +23,8 @@ export async function createTracker(video: HTMLVideoElement, onFrame: (f: Frame)
   let sm: Vals | null = null;
   const cv = document.createElement("canvas"); cv.width = 32; cv.height = 24;
   const cx = cv.getContext("2d", { willReadFrequently: true })!;
-  const emit = (vals: Vals | null, face: boolean, size: boolean) =>
-    onFrame({ t: Date.now(), vals, q: { face, size, light: light > 0.18 && light < 0.92, fps } });
+  const emit = (vals: Vals | null, face: boolean, size: boolean, pos?: { x: number; y: number; s: number }) =>
+    onFrame({ t: Date.now(), vals, pos, q: { face, size, light: light > 0.18 && light < 0.92, fps } });
 
   const tick = (now: number) => {
     if (!running) return;
@@ -64,7 +64,7 @@ export async function createTracker(video: HTMLVideoElement, onFrame: (f: Frame)
       frown: 0.6 * (((bs.mouthFrownLeft ?? 0) + (bs.mouthFrownRight ?? 0)) / 2) + 0.4 * (((bs.browDownLeft ?? 0) + (bs.browDownRight ?? 0)) / 2), sideA: bs.mouthLeft ?? 0, sideB: bs.mouthRight ?? 0 };
     const size = iod / W > 0.1 && iod / W < 0.45 && P[1].x > 0.1 && P[1].x < 0.9 && P[1].y > 0.1 && P[1].y < 0.9;
     if (!sm) sm = raw; else for (const k of Object.keys(raw) as (keyof Vals)[]) sm[k] = sm[k] * 0.65 + raw[k] * 0.35; // temporal smoothing
-    emit({ ...sm }, true, size);
+    emit({ ...sm }, true, size, { x: P[1].x, y: P[1].y, s: iod / W });
   };
   raf = requestAnimationFrame(tick);
   return { stop() { running = false; cancelAnimationFrame(raf); try { lm.close?.(); } catch {} }, setSwap(v: boolean) { swap = v; } };
