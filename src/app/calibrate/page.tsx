@@ -12,13 +12,13 @@ const MOVES: Id[] = ["smile", "brow", "frown", "pucker", "right", "left", "close
 const COPY: Record<Id, { title: string; cue: string; tip: string; games: string }> = {
   smile: { title: "Smile", cue: "Give a gentle smile", tip: "Like greeting a friend. Never force it.", games: "Flight · Dash" },
   brow: { title: "Eyebrow raise", cue: "Lift your eyebrows", tip: "Raise them gently, as if mildly surprised.", games: "Flight · Dash" },
-  frown: { title: "Frown", cue: "Draw your brows and mouth corners down", tip: "A soft frown, like concentrating. No strain.", games: "Dash" },
+  frown: { title: "Frown", cue: "Turn the corners of your mouth down", tip: "Just your mouth, like a small frown. Keep your brows relaxed.", games: "Dash" },
   pucker: { title: "Lip pucker", cue: "Round your lips like “ooo”", tip: "Gently purse them and hold.", games: "Flight" },
   right: { title: "Pucker to your right", cue: "Pucker, then nudge your lips to your right", tip: "Round your lips, then shift them toward your right cheek.", games: "Dash" },
   left: { title: "Pucker to your left", cue: "Pucker, then nudge your lips to your left", tip: "Round your lips, then shift them toward your left cheek.", games: "Dash" },
   close: { title: "Gentle eye closure", cue: "Close your eyes softly", tip: "Soft, like resting. No squeezing.", games: "Flight" },
 };
-const MINSK: Record<SK, number> = { smile: .015, brow: .015, frown: .05, pucker: .08, close: .08, sideA: .08, sideB: .08 };
+const MINSK: Record<SK, number> = { smile: .015, brow: .015, frown: .04, pucker: .08, close: .08, sideA: .08, sideB: .08 };
 const CAL_KEYS = ["smile", "brow", "pucker", "close", "liftL", "liftR", "browL", "browR", "closeL", "closeR"] as (keyof Vals)[];
 const FSIDES: Record<string, (keyof Vals)[] | null> = { smile: ["liftL", "liftR"], brow: ["browL", "browR"], pucker: null, close: ["closeL", "closeR"] };
 const sig = (v: Vals): Record<SK, number> => ({ smile: v.smile, brow: v.brow, frown: v.frown, pucker: v.pucker, close: v.close, sideA: v.sideA - 0.6 * v.sideB + 0.3 * v.pucker, sideB: v.sideB - 0.6 * v.sideA + 0.3 * v.pucker });
@@ -37,7 +37,6 @@ function Guide({ id, size = 64 }: { id: Id | "rest" | "pucker"; size?: number })
     <svg width={size} height={size} viewBox="0 0 100 100" fill="none" stroke={BLUE} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <ellipse cx="50" cy="52" rx="31" ry="38" strokeOpacity=".5" />
       {id === "brow" ? <><path d="M26 33q9-9 18 0M56 33q9-9 18 0" /><circle cx="35" cy="46" r="4" fill={BLUE} /><circle cx="65" cy="46" r="4" fill={BLUE} /></>
-        : id === "frown" ? <><path d="M26 33l18 8M74 33l-18 8" /><circle cx="36" cy="48" r="3" fill={BLUE} /><circle cx="64" cy="48" r="3" fill={BLUE} /></>
         : id === "close" ? <><path d="M27 46q8 7 16 0M57 46q8 7 16 0" /><path d="M27 36q8-4 16 0M57 36q8-4 16 0" strokeOpacity=".6" /></>
         : <><path d="M27 37q8-4 16 0M57 37q8-4 16 0" strokeOpacity=".7" /><circle cx="36" cy="47" r="3" fill={BLUE} /><circle cx="64" cy="47" r="3" fill={BLUE} /></>}
       {id === "smile" ? <path d="M33 68q17 14 34 0" /> : id === "frown" ? <path d="M35 77q15-12 30 0" /> : id === "pucker" || id === "right" || id === "left" ? <circle cx={50 + sx * 2.4} cy="70" r="6.5" /> : id === "brow" ? <path d="M40 70h20" /> : <path d="M38 70h24" strokeOpacity=".7" />}
@@ -133,11 +132,11 @@ export default function Calibrate() {
         else if (!rough || !good) {
           if (!r.lostAt) r.lostAt = now;
           if ((r.phase === "count" || r.phase === "hold") && now - r.lostAt > 500) { r.phase = "brief"; r.phaseStart = now; r.buf = []; }
-          if (r.phase === "brief") r.phaseStart = now;
+          if (r.phase === "brief") { r.phaseStart = now; r.skipBrief = false; }
           r.progress = 0; if (!face) hint = "Looking for your face…";
         } else {
           r.lostAt = 0; const el = now - r.phaseStart;
-          if (r.phase === "brief") { hint = r.fails ? "Let’s try that once more" : "Get ready"; r.progress = Math.min(1, el / BRIEF); if (el >= BRIEF || r.skipBrief) { r.skipBrief = false; r.phase = "count"; r.phaseStart = now; } }
+          if (r.phase === "brief") { hint = r.fails ? "Let’s try that once more" : "Press I’m ready"; r.progress = 0; if (r.skipBrief) { r.skipBrief = false; r.phase = "count"; r.phaseStart = now; } }
           else if (r.phase === "count") { count = Math.max(1, 3 - Math.floor(el / 1000)); hint = isRest ? "Relax your face" : COPY[id].title; r.progress = 0; if (el >= 3000) { r.phase = "hold"; r.phaseStart = now; r.buf = []; buzz(40); } }
           else if (r.phase === "hold") {
             hint = isRest ? "Stay relaxed…" : "Hold it…"; r.buf.push(fr!.vals!); r.progress = Math.min(1, el / HOLD);
@@ -184,20 +183,26 @@ export default function Calibrate() {
   const videoEl = <video ref={video} playsInline muted className="pointer-events-none fixed left-0 top-0 h-1 w-1 opacity-[0.02]" aria-hidden />;
 
   if (step === "intro") return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))]">{videoEl}
-      <p className="text-xs uppercase tracking-[.3em] text-teal">{first ? "Welcome · one-time setup" : "Calibration"}</p>
-      <h1 className="mt-2 font-display text-4xl leading-tight">Set up your camera</h1>
-      <p className="mt-3 text-navy/70">About two minutes. We’ll learn your own comfortable movements so every game fits you. This one calibration is used by Mirror Flight and Mirror Dash.</p>
-      <div className="mt-5 rounded-2xl border border-sage/50 bg-sage/15 p-4" role="note"><p className="font-medium">Please take off your glasses.</p><p className="mt-1 text-sm text-navy/70">Calibration can’t read your face reliably through lenses or frames, and glare can hide eye movements.</p></div>
-      <ul className="mt-4 grid gap-2 text-sm text-navy/80">
-        <li className="flex gap-3 rounded-xl bg-paper p-3 shadow-soft"><span className="text-teal">01</span>Sit somewhere bright, with light on your face, not behind you.</li>
-        <li className="flex gap-3 rounded-xl bg-paper p-3 shadow-soft"><span className="text-teal">02</span>Hold your phone at eye level, about an arm’s length away.</li>
-        <li className="flex gap-3 rounded-xl bg-paper p-3 shadow-soft"><span className="text-teal">03</span>Fit your head inside the outline. For each movement we’ll tell you what to do, count 3, 2, 1, and you hold it.</li>
-        <li className="flex gap-3 rounded-xl bg-paper p-3 shadow-soft"><span className="text-teal">04</span>Go gently and stop if anything feels strained. You can skip any movement.</li></ul>
-      <p className="mt-4 text-xs text-navy/60">Your camera is processed on this device. Video is never uploaded or saved.</p>
-      {err && <p role="alert" className="mt-3 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
-      <div className="mt-auto pt-6"><button className="btn-primary w-full min-h-[60px] text-lg" disabled={cam === "loading"} onClick={() => startCam("align")}>{cam === "loading" ? "Starting camera…" : "Start camera"}</button>
-        <div className="mt-3 flex justify-between text-sm text-navy/60"><button onClick={() => (location.href = "/dashboard")}>← Back</button>{first && <button onClick={() => { try { sessionStorage.setItem("sq-skipcal", "1"); } catch { /* ignore */ } location.href = "/dashboard"; }}>Skip for now</button>}</div></div>
+    <main className="mx-auto flex min-h-dvh max-w-md flex-col px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))]">{videoEl}
+      <button className="self-start text-sm text-navy/60" onClick={() => (location.href = "/dashboard")} aria-label="Back to dashboard">← Back</button>
+      <div className="flex flex-1 flex-col items-center justify-center text-center">
+        <svg viewBox="0 0 200 240" className="h-52 w-44 text-teal" fill="none" aria-hidden>
+          <ellipse cx="100" cy="120" rx="70" ry="92" stroke="currentColor" strokeWidth="2.5" strokeDasharray="8 7" />
+          {Array.from({ length: 36 }, (_, i) => { const a = i * Math.PI / 18, l = i % 3 === 0; return <line key={i} x1={100 + Math.cos(a) * 76} y1={120 + Math.sin(a) * 98} x2={100 + Math.cos(a) * (l ? 88 : 82)} y2={120 + Math.sin(a) * (l ? 112 : 104)} stroke="currentColor" strokeOpacity={l ? 0.9 : 0.4} strokeWidth="1.5" />; })}
+          <path d="M70 108q8-5 16 0M114 108q8-5 16 0" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" /><path d="M82 152q18 12 36 0" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <path d="M18 20h22M18 20v22M182 20h-22M182 20v22M18 220h22M18 220v-22M182 220h-22M182 220v-22" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+        </svg>
+        <h1 className="mt-6 font-display text-4xl">{first ? "Let’s calibrate" : "Calibrate"}</h1>
+        <p className="mt-1 text-navy/60">About 2 minutes</p>
+        <ul className="mt-7 grid w-full grid-cols-3 gap-3 text-xs text-navy/80">
+          <li className="rounded-2xl bg-paper px-2 py-4 shadow-soft"><svg viewBox="0 0 32 32" className="mx-auto h-8 w-8 text-teal" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><circle cx="9" cy="19" r="5" /><circle cx="23" cy="19" r="5" /><path d="M14 19h4M4 19L6 10M28 19l-2-9M5 28L27 8" /></svg><span className="mt-2 block">Glasses off</span></li>
+          <li className="rounded-2xl bg-paper px-2 py-4 shadow-soft"><svg viewBox="0 0 32 32" className="mx-auto h-8 w-8 text-teal" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><circle cx="16" cy="16" r="5" /><path d="M16 4v3M16 25v3M4 16h3M25 16h3M7.5 7.5l2 2M22.5 22.5l2 2M24.5 7.5l-2 2M9.5 22.5l-2 2" /></svg><span className="mt-2 block">Good light</span></li>
+          <li className="rounded-2xl bg-paper px-2 py-4 shadow-soft"><svg viewBox="0 0 32 32" className="mx-auto h-8 w-8 text-teal" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="9" y="3" width="14" height="26" rx="3" /><circle cx="16" cy="10" r="2" /><path d="M13 25h6" /></svg><span className="mt-2 block">Eye level</span></li>
+        </ul>
+      </div>
+      {err && <p role="alert" className="mb-3 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
+      <button className="btn-primary min-h-[60px] w-full text-lg" disabled={cam === "loading"} onClick={() => startCam("align")}>{cam === "loading" ? "Starting camera…" : "Start"}</button>
+      <p className="mt-3 text-center text-xs text-navy/50">Video stays on your device.{first && <> · <button className="underline" onClick={() => { try { sessionStorage.setItem("sq-skipcal", "1"); } catch { /* ignore */ } location.href = "/dashboard"; }}>Skip for now</button></>}</p>
     </main>);
 
   if (step === "review") {
@@ -234,20 +239,22 @@ export default function Calibrate() {
         <div className="pointer-events-none absolute inset-x-0 bottom-0 p-3">
           <div className="rounded-xl border border-white/10 bg-[#0f1038]/75 p-3 text-white backdrop-blur">
             {step === "align" && <><p className="font-display text-xl">Fit your head in the outline</p><p className="mt-1 text-sm text-white/75">Look straight at the camera. Glasses off, please.</p></>}
-            {step === "rest" && (hud.phase === "brief" ? <><p className="font-display text-xl">First, a relaxed face</p><p className="mt-1 text-sm text-white/75">Look at the camera with a comfortable, neutral face. We’ll count down, then you hold it for 3 seconds.</p></>
+            {step === "rest" && (hud.phase === "brief" ? <><p className="font-display text-xl">First, a relaxed face</p><p className="mt-1 text-sm text-white/75">Look at the camera with a comfortable, neutral face.</p></>
               : hud.phase === "count" ? <><p className="font-display text-xl">Relax your face</p><p className="mt-1 text-sm text-white/75">Get comfortable and neutral.</p></>
               : <><p className="font-display text-xl">Stay relaxed</p><p className="mt-1 text-sm text-white/75">Hold still. Almost done.</p></>)}
-            {c && (hud.phase === "brief" ? <><p className="text-xs uppercase tracking-[.2em] text-[#8fd0ff]">Next up</p><p className="mt-0.5 font-display text-xl">{c.cue}</p><p className="mt-1 text-sm text-white/75">{hud.skipHint ? "Not picking it up yet. Try a little more this time, or skip this one." : `${c.tip} Then we count 3, 2, 1 and you hold it.`}</p></>
+            {c && (hud.phase === "brief" ? <><p className="text-xs uppercase tracking-[.2em] text-[#8fd0ff]">Next up</p><p className="mt-0.5 font-display text-xl">{c.cue}</p><p className="mt-1 text-sm text-white/75">{hud.skipHint ? "Not picking it up yet. Try a little more this time, or skip this one." : `${c.tip}`}</p></>
               : hud.phase === "count" ? <><p className="font-display text-xl">{c.cue}</p><p className="mt-1 text-sm text-white/75">Start making the face now, then hold it when the count ends.</p></>
               : <><p className="font-display text-xl">Hold it…</p><p className="mt-1 text-sm text-white/75">{c.title}. Keep it steady until the bar fills.</p></>)}
             <div className="mt-2.5 h-1 rounded-full bg-white/15"><div className="h-1 rounded-full bg-[#8fd0ff] transition-[width] duration-100" style={{ width: `${Math.round(hud.progress * 100)}%` }} /></div>
           </div></div>
       </div>
       {err && <p role="alert" className="mt-3 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
-      <div className="mt-4 flex items-center gap-3">
-        <button className="btn-quiet" onClick={() => goBack()}>Back</button>
-        {(isMove || step === "rest") && hud.phase === "brief" && <button className="btn-primary flex-1" onClick={() => { S.current.skipBrief = true; }}>I’m ready</button>}
-        {isMove && <button className={`btn-quiet flex-1 ${hud.skipHint ? "!border-teal" : ""}`} onClick={() => enter(S.current.redo ? "review" : ORDER[ORDER.indexOf(step) + 1])}>Skip this one</button>}
+      <div className="mt-4 grid gap-3">
+        {(isMove || step === "rest") && hud.phase === "brief" && <button className="btn-primary min-h-[60px] w-full text-lg" onClick={() => { S.current.skipBrief = true; }}>I’m ready</button>}
+        <div className="flex items-center gap-3">
+          <button className="btn-quiet" onClick={() => goBack()}>Back</button>
+          {isMove && <button className={`btn-quiet flex-1 ${hud.skipHint ? "!border-teal" : ""}`} onClick={() => enter(S.current.redo ? "review" : ORDER[ORDER.indexOf(step) + 1])}>Skip this one</button>}
+        </div>
       </div>
     </main>);
 }
