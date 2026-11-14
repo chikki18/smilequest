@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { PATIENT_TEST_MODE } from "@/lib/config";
+import ThemeToggle from "@/components/ThemeToggle";
 import { GAME_NAMES, exerciseReady, loadContext, moveLabel, type Plan, type Sess } from "@/lib/workflow";
 
 type Row = { id: string; mode: string; status: string; started_at: string; game: string | null; duration_seconds: number | null };
@@ -47,25 +48,45 @@ function FullDashboard() {
 }
 
 function TestHome() {
-  const [ok, setOk] = useState(false);
+  const [ok, setOk] = useState(false), [name, setName] = useState(""), [cal, setCal] = useState<{ flight: boolean; dash: boolean }>({ flight: false, dash: false });
   useEffect(() => { (async () => {
     const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) { location.href = "/"; return; }
-    const { data: p } = await sb.from("profiles").select("onboarding_completed_at").maybeSingle();
+    const { data: p } = await sb.from("profiles").select("onboarding_completed_at,first_name").maybeSingle();
     if (!p?.onboarding_completed_at) { location.href = "/onboarding"; return; }
-    setOk(true);
+    setName(p.first_name ?? "");
+    const { data: c } = await sb.from("calibration_profiles").select("created_at").order("created_at", { ascending: false }).limit(1);
+    const { data: d } = await sb.from("dash_calibration").select("summary").maybeSingle();
+    const mv = d?.summary?.moves, dashReady = !!mv && ["jump", "fly", "duck", "right", "left"].every(m => mv[m]?.detectable);
+    const flightReady = !!c?.length;
+    let skipped = false; try { skipped = sessionStorage.getItem("sq-skipcal") === "1"; } catch { /* ignore */ }
+    if (!flightReady && !dashReady && !skipped) { location.href = "/calibrate?first=1&next=/dashboard"; return; }
+    setCal({ flight: flightReady, dash: dashReady }); setOk(true);
   })(); }, []);
   async function logout() { await supabase().auth.signOut(); location.href = "/"; }
   if (!ok) return <main className="grid min-h-dvh place-items-center text-navy/60">Loading…</main>;
+  const any = cal.flight || cal.dash;
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))] text-center">
-      <svg viewBox="0 0 240 130" className="w-full rounded-3xl shadow-soft" aria-hidden><rect width="240" height="130" fill="#62c3ee" /><rect x="170" y="0" width="30" height="44" fill="#79c08c" stroke="#35604a" strokeWidth="3" /><rect x="170" y="88" width="30" height="42" fill="#79c08c" stroke="#35604a" strokeWidth="3" />
-        <ellipse cx="80" cy="66" rx="26" ry="23" fill="#6bb3a8" stroke="#2b3340" strokeWidth="3" /><circle cx="90" cy="59" r="6" fill="#fff" stroke="#2b3340" strokeWidth="2" /><circle cx="92" cy="59" r="3" fill="#2b3340" /><path d="M104 66 L120 71 L104 76Z" fill="#f29e4c" stroke="#2b3340" strokeWidth="2" /><circle cx="185" cy="66" r="9" fill="#f6c945" stroke="#a67c12" strokeWidth="2" /></svg>
-      <h1 className="mt-8 font-display text-3xl">Pick a game</h1>
-      <a href="/flyer" className="btn-primary mt-5 inline-flex min-h-[72px] w-full items-center justify-center text-2xl">Mirror Flight</a>
-      <p className="mt-1 text-sm text-navy/60">Gentle, steady. Fly through the gaps.</p>
-      <a href="/dash" className="btn-primary mt-5 inline-flex min-h-[72px] w-full items-center justify-center text-2xl">Mirror Dash</a>
-      <p className="mt-1 text-sm text-navy/60">Fast and challenging. Run, jump, duck and fly.</p>
-      <button className="mt-8 text-sm text-navy/60 underline" onClick={logout}>Log out</button>
+    <main className="mx-auto min-h-dvh max-w-md px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))]">
+      <div className="flex items-center justify-between gap-3"><p className="text-xs uppercase tracking-[.3em] text-teal">SmileQuest</p><ThemeToggle /></div>
+      <h1 className="mt-6 font-display text-4xl leading-tight">{name ? `Hi, ${name}.` : "Welcome back."}</h1>
+      <h2 className="mt-8 text-xs uppercase tracking-[.25em] text-navy/60">Pick a game</h2>
+      <a href="/flyer" className="mt-3 block overflow-hidden rounded-3xl border border-navy/10 bg-paper shadow-soft transition active:scale-[.99]">
+        <svg viewBox="0 0 320 120" className="block w-full" aria-hidden><defs><linearGradient id="fg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="rgb(var(--lav))" /><stop offset="1" stopColor="rgb(var(--sage))" /></linearGradient></defs><rect width="320" height="120" fill="url(#fg)" />
+          <rect x="220" y="0" width="26" height="40" rx="4" fill="rgb(var(--teal))" /><rect x="220" y="84" width="26" height="36" rx="4" fill="rgb(var(--teal))" />
+          <ellipse cx="96" cy="62" rx="24" ry="20" fill="rgb(var(--navy))" opacity=".9" /><circle cx="106" cy="56" r="5" fill="rgb(var(--paper))" /><path d="M118 62l14 5-14 5z" fill="rgb(var(--gold))" /><circle cx="262" cy="62" r="8" fill="rgb(var(--paper))" opacity=".9" /></svg>
+        <div className="flex items-center justify-between p-5"><div><h3 className="font-display text-2xl">Mirror Flight</h3><p className="mt-1 text-sm text-navy/70">Gentle and steady. Fly through the gaps.</p></div><span className="text-2xl text-teal" aria-hidden>→</span></div></a>
+      <a href="/dash" className="mt-4 block overflow-hidden rounded-3xl border border-navy/10 bg-paper shadow-soft transition active:scale-[.99]">
+        <svg viewBox="0 0 320 120" className="block w-full" aria-hidden><defs><linearGradient id="dg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="rgb(var(--teal))" /><stop offset="1" stopColor="rgb(var(--lav))" /></linearGradient></defs><rect width="320" height="120" fill="url(#dg)" />
+          <polygon points="140,30 180,30 260,120 60,120" fill="rgb(var(--navy))" opacity=".55" /><line x1="153" y1="30" x2="128" y2="120" stroke="rgb(var(--paper))" strokeOpacity=".5" /><line x1="167" y1="30" x2="192" y2="120" stroke="rgb(var(--paper))" strokeOpacity=".5" />
+          <rect x="146" y="70" width="28" height="12" rx="2" fill="rgb(var(--sage))" /><circle cx="160" cy="98" r="9" fill="rgb(var(--paper))" /></svg>
+        <div className="flex items-center justify-between p-5"><div><h3 className="font-display text-2xl">Mirror Dash</h3><p className="mt-1 text-sm text-navy/70">Fast and challenging. Run, jump, duck and fly.</p></div><span className="text-2xl text-teal" aria-hidden>→</span></div></a>
+      <h2 className="mt-8 text-xs uppercase tracking-[.25em] text-navy/60">Calibrate</h2>
+      <a href="/calibrate" className="mt-3 flex items-center justify-between gap-4 rounded-3xl border border-navy/10 bg-paper p-5 shadow-soft transition active:scale-[.99]">
+        <div><h3 className="font-display text-xl">{any ? "Recalibrate" : "Calibrate your camera"}</h3>
+          <p className="mt-1 text-sm text-navy/70">{any ? "One calibration is shared by both games. Redo it any time, for example if the lighting changes." : "Teach the games your own movements. It takes about two minutes."}</p>
+          <p className="mt-2 flex flex-wrap gap-2 text-xs"><span className={`rounded-full px-3 py-1 ${cal.flight ? "bg-sage/40" : "bg-gold/30"}`}>Flight {cal.flight ? "ready" : "not set up"}</span><span className={`rounded-full px-3 py-1 ${cal.dash ? "bg-sage/40" : "bg-gold/30"}`}>Dash {cal.dash ? "ready" : "not set up"}</span></p></div>
+        <span className="text-2xl text-teal" aria-hidden>→</span></a>
+      <button className="mt-10 block w-full text-center text-sm text-navy/60 underline" onClick={logout}>Log out</button>
     </main>);
 }
 
