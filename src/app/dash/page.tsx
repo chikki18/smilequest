@@ -39,26 +39,33 @@ function loadSettings(): Settings { try { const j = JSON.parse(localStorage.getI
 function saveSettings(s: Settings) { try { localStorage.setItem(SKEY, JSON.stringify(s)); } catch { /* ignore */ } }
 
 // ---------- world ----------
-const W = 360, HZ = 150, LANE = 100, D0 = 10, TOPBAR = 96, BOTBAR = 112;
+const W = 360, HZ = 150, LANE = 100, D0 = 10, TOPBAR = 64, BOTBAR = 112;
 const sOf = (d: number) => 1 / (1 + d / D0);
 type Kind = "hurdle" | "bar" | "wall" | "full";
-type Row = { z: number; kind: Kind; lanes: number[]; zone: boolean; threat: boolean | null; hit: boolean; done: boolean };
+type Row = { z: number; kind: Kind; lanes: number[]; zone: boolean; threat: boolean | null; hit: boolean; done: boolean; hold?: boolean };
 type Coin = { z: number; lane: number; cy: number; got: boolean };
 type G = {
   stage: "ready" | "play" | "done"; readyLeft: number; t: number; dist: number; lane: number; lanePos: number; cd: number; jumpT: number; crouchT: number; jet: number; fuel: number;
   on: Record<M, boolean>; lev: Record<M, number>; rows: Row[]; coins: Coin[]; spawnZ: number; speed: number; mul: number; invuln: number; coinsGot: number; points: number;
   streak: number; best: number; cleared: number; stumbles: number; top: number; counts: Record<M, number>; clearedBy: Record<string, number>; stumbledBy: Record<string, number>;
   lostSince: number | null; adjust: boolean; manual: boolean; wh: number; py: number; hint: string; run: number; pend: Record<M, number>;
+  tut: number; tutHit: boolean; tutWait: number; tutFlash: string; hold: number; flyLock: number; caught: number; bearY: number; bearT: number;
 };
 const z5 = () => ({ jump: 0, fly: 0, duck: 0, right: 0, left: 0 });
 const fresh = (wh: number): G => ({
   stage: "ready", readyLeft: 6, t: 0, dist: 0, lane: 1, lanePos: 1, cd: 0, jumpT: 0, crouchT: 0, jet: 0, fuel: 1,
   on: { jump: false, fly: false, duck: false, right: false, left: false }, lev: z5(), rows: [], coins: [], spawnZ: 60, speed: 0, mul: 1, invuln: 0, coinsGot: 0, points: 0,
   streak: 0, best: 0, cleared: 0, stumbles: 0, top: 0, counts: z5(), clearedBy: {}, stumbledBy: {}, lostSince: null, adjust: false, manual: false, wh, py: wh - BOTBAR - 40, hint: "", run: 0, pend: z5(),
+  tut: -1, tutHit: false, tutWait: 0, tutFlash: "", hold: 0, flyLock: 0, caught: 0, bearY: 190, bearT: 0,
 });
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 function spawnRow(s: G, len: number) {
   const p = clamp(s.t / len, 0, 1);
+  if (s.t > 8 && Math.random() < (p > .4 ? .3 : .2)) {
+    const kind: Kind = Math.random() < .6 ? "hurdle" : "bar", n = 3 + (Math.random() < .5 ? 1 : 0), l = Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) { const z = s.spawnZ + i * 5; s.rows.push({ z, kind, lanes: [l], zone: false, threat: null, hit: false, done: false, hold: true }); if (i < n - 1) s.coins.push({ z: z + 2.5, lane: l, cy: kind === "hurdle" ? .75 : 0, got: false }); }
+    s.spawnZ += (n - 1) * 5 + Math.max(24, 36 - 12 * p) + rnd(0, 6); return;
+  }
   const pool: Kind[] = ["hurdle"]; if (s.t > 6) pool.push("wall"); if (s.t > 12) pool.push("bar", "hurdle"); if (s.t > 20) pool.push("full", "wall");
   const kind = pool[Math.floor(Math.random() * pool.length)];
   const all = [0, 1, 2].sort(() => Math.random() - .5);
@@ -71,6 +78,24 @@ function spawnRow(s: G, len: number) {
   else if (kind === "wall" && free.length) { for (const dz of [-4, 0, 4]) s.coins.push({ z: s.spawnZ + dz, lane: free[0], cy: 0, got: false }); }
   else if (kind === "full") { for (const dz of [-8, -4, 0, 4, 8]) s.coins.push({ z: s.spawnZ + dz, lane: 1, cy: 1.1, got: false }); }
   s.spawnZ += Math.max(22, 36 - 12 * p) + rnd(0, 6);
+}
+
+const TUT: { kind: Kind; n: number; text: string }[] = [
+  { kind: "hurdle", n: 1, text: "Smile to jump" },
+  { kind: "bar", n: 1, text: "Frown to duck" },
+  { kind: "wall", n: 1, text: "Pucker left or right to change lanes" },
+  { kind: "full", n: 1, text: "Raise your eyebrows to fly" },
+  { kind: "hurdle", n: 4, text: "Hold your smile to stay in the air" },
+  { kind: "bar", n: 4, text: "Hold your frown to stay low" },
+];
+function tutSpawn(s: G, dt: number) {
+  s.tutWait = Math.max(0, s.tutWait - dt);
+  if (s.tut >= TUT.length) return;
+  if (s.rows.some(r => !r.done)) return;
+  if (s.rows.length) { s.rows = []; s.tutWait = 1.6; if (!s.tutHit) { s.tut++; s.tutFlash = "Nice!"; } else s.tutFlash = "Let’s try that again"; s.tutHit = false; return; }
+  if (s.tutWait > 0) return;
+  const T = TUT[s.tut]; s.tutFlash = "";
+  for (let i = 0; i < T.n; i++) s.rows.push({ z: s.dist + 34 + i * 5, kind: T.kind, lanes: [s.lane], zone: false, threat: null, hit: false, done: false, hold: T.n > 1 });
 }
 
 type Pal = Record<string, string>;
@@ -123,6 +148,21 @@ function drawFox(c: CanvasRenderingContext2D, px: number, y0: number, bodyH: num
   c.fillStyle = "#d4672a"; for (const sd of [-1, 1]) { c.beginPath(); c.moveTo(px + sd * 13, hy - 6); c.lineTo(px + sd * 12, hy - 28); c.lineTo(px + sd * 2, hy - 13); c.closePath(); c.fill(); c.stroke(); c.fillStyle = "#2a1a0e"; c.beginPath(); c.moveTo(px + sd * 12, hy - 28); c.lineTo(px + sd * 11, hy - 20); c.lineTo(px + sd * 6, hy - 17); c.closePath(); c.fill(); c.fillStyle = "#d4672a"; }
   const hg = c.createRadialGradient(px - 4, hy - 4, 2, px, hy, 16); hg.addColorStop(0, "#f09a50"); hg.addColorStop(1, "#c85c22");
   c.fillStyle = hg; c.beginPath(); c.ellipse(px, hy, 15, 14, 0, 0, 7); c.fill(); c.stroke();
+}
+function drawBear(c: CanvasRenderingContext2D, px: number, y0: number, k: number, now: number, lunge: boolean) {
+  c.save(); c.translate(px, y0); c.scale(k, k); c.lineJoin = "round"; c.strokeStyle = "#150c07"; c.lineWidth = 2;
+  const run = Math.sin(now / 70);
+  for (const [dx, ph] of [[-22, 0], [8, Math.PI]] as [number, number][]) { const up = Math.max(0, Math.sin(now / 70 + ph)) * 8; c.fillStyle = "#4a2f1d"; c.beginPath(); c.roundRect(dx, -28 - up, 17, 28, 7); c.fill(); c.stroke(); }
+  const bg = c.createLinearGradient(-32, 0, 32, 0); bg.addColorStop(0, "#7a4e2c"); bg.addColorStop(1, "#3d2515");
+  c.fillStyle = bg; c.beginPath(); c.ellipse(0, -56, 31, 36, 0, 0, 7); c.fill(); c.stroke();
+  c.fillStyle = "#6b4326"; for (const sd of [-1, 1]) { c.beginPath(); c.ellipse(sd * 30, -62 + run * 3 * sd, 9, 20, sd * .35, 0, 7); c.fill(); c.stroke(); }
+  c.fillStyle = "#8a5a33"; c.beginPath(); c.ellipse(0, -100, 27, 24, 0, 0, 7); c.fill(); c.stroke();
+  for (const sd of [-1, 1]) { c.beginPath(); c.arc(sd * 21, -120, 9, 0, 7); c.fill(); c.stroke(); c.fillStyle = "#d9a98a"; c.beginPath(); c.arc(sd * 21, -120, 4, 0, 7); c.fill(); c.fillStyle = "#8a5a33"; }
+  c.fillStyle = "#d3ac84"; c.beginPath(); c.ellipse(0, -92, 14, 10, 0, 0, 7); c.fill(); c.stroke();
+  c.fillStyle = "#1b0f08"; c.beginPath(); c.ellipse(0, -97, 5.5, 3.6, 0, 0, 7); c.fill();
+  if (lunge) { c.fillStyle = "#5a1c1c"; c.beginPath(); c.ellipse(0, -85, 8, 5, 0, 0, 7); c.fill(); } else { c.strokeStyle = "#1b0f08"; c.beginPath(); c.moveTo(0, -93); c.lineTo(0, -88); c.moveTo(-6, -85); c.quadraticCurveTo(0, -81, 6, -85); c.stroke(); }
+  c.fillStyle = "#fff"; c.strokeStyle = "#150c07"; for (const sd of [-1, 1]) { c.beginPath(); c.ellipse(sd * 10, -106, 4.5, 5, 0, 0, 7); c.fill(); c.stroke(); c.fillStyle = "#1b0f08"; c.beginPath(); c.arc(sd * 10, -105, 2.2, 0, 7); c.fill(); c.fillStyle = "#fff"; }
+  c.restore();
 }
 function drawWorld(c: CanvasRenderingContext2D, s: G, now: number) {
   refreshPal();
@@ -189,6 +229,8 @@ function drawWorld(c: CanvasRenderingContext2D, s: G, now: number) {
   const crouch = s.crouchT > 0 && lift < 5, bodyH = crouch ? 40 : 66, y0 = PY - lift;
   c.fillStyle = "rgba(0,0,0,.32)"; c.beginPath(); c.ellipse(px, PY + 2, 24 - lift * .07, 7, 0, 0, 7); c.fill();
   if (lift < 5) for (let i = 0; i < 4; i++) { const t = (now / 320 + i * .25) % 1; c.fillStyle = `rgba(214,198,160,${(1 - t) * .35})`; c.beginPath(); c.arc(px + (i - 1.5) * 9, PY - t * 10, 3 + t * 6, 0, 7); c.fill(); }
+  { const lvl = clamp(s.stumbles, 1, 3), tgt = s.caught > 0 ? 6 : s.bearT > 0 ? (lvl >= 3 ? 22 : lvl === 2 ? 52 : 82) : 200; s.bearY += (tgt - s.bearY) * .1;
+    if (s.bearY < 150) drawBear(c, px + Math.sin(now / 190) * 5, PY + s.bearY, lvl >= 3 ? 1.3 : lvl === 2 ? 1.15 : 1, now, s.caught > 0); }
   c.globalAlpha = s.invuln > 0 && Math.floor(now / 110) % 2 ? .55 : 1; drawFox(c, px, y0, bodyH, lift, s, now); c.globalAlpha = 1;
   for (const o of objs) if (o.d < 0) o.draw();
   // embers + vignette
@@ -217,7 +259,7 @@ function Coin({ size = 24 }: { size?: number }) { return <svg width={size} heigh
 
 type Prof = { total: number };
 type GameRow = { id: string; played_at: string; duration_seconds: number; points: number; distance: number; coins: number; cleared: number; stumbles: number; best_streak: number; top_speed: number | null; completed: boolean; per_move: any };
-type Result = { points: number; distance: number; coins: number; cleared: number; stumbles: number; bestStreak: number; topSpeed: number; seconds: number; completed: boolean; counts: Record<M, number>; saved: boolean };
+type Result = { points: number; distance: number; coins: number; cleared: number; stumbles: number; bestStreak: number; topSpeed: number; seconds: number; completed: boolean; caught?: boolean; counts: Record<M, number>; saved: boolean };
 
 function Page({ children }: { children?: any }) { return <main className="mx-auto max-w-md px-6 pb-12 pt-[max(2rem,env(safe-area-inset-top))]">{children}</main>; }
 
@@ -232,7 +274,7 @@ export default function Dash() {
   const [st, setSt] = useState<Settings>(DEF), stRef = useRef(st); stRef.current = st;
   const [msg, setMsg] = useState<string | null>(null), [busy, setBusy] = useState(false), [preview, setPreview] = useState(true), [gainUi, setGainUi] = useState(1.3);
   const [box, setBox] = useState({ w: 360, h: 640 });
-  const [ui, setUi] = useState({ stage: "ready" as "ready" | "play" | "done", ready: 6, left: 90, dist: 0, coins: 0, mul: 1, adjust: false, paused: false, hint: "", lev: z5() as Record<M, number>, on: { jump: false, fly: false, duck: false, right: false, left: false } as Record<M, boolean>, stumble: false });
+  const [ui, setUi] = useState({ stage: "ready" as "ready" | "play" | "done", ready: 6, left: 90, dist: 0, coins: 0, mul: 1, adjust: false, paused: false, hint: "", lev: z5() as Record<M, number>, on: { jump: false, fly: false, duck: false, right: false, left: false } as Record<M, boolean>, stumble: false, points: 0, lives: 3, tut: -1, tutText: "" });
   const [result, setResult] = useState<Result | null>(null), [games, setGames] = useState<GameRow[] | null>(null);
   const [calFrom, setCalFrom] = useState<"play" | "settings">("play");
   const [calStep, setCalStep] = useState(0), [calCam, setCalCam] = useState<"off" | "loading" | "on">("off");
@@ -307,6 +349,7 @@ export default function Dash() {
   }
 
   // ---- flow ----
+  async function onTutorial() { setMsg(null); if (!clear) { setView("clearance"); return; } if (!hasCal) { openCalibrate("play"); return; } startGame(true); }
   async function onPlay() { setMsg(null); if (!clear) { setView("clearance"); return; } if (!hasCal) { openCalibrate("play"); return; } setView("ready"); }
   async function confirmClearance() {
     setBusy(true); setMsg(null);
@@ -316,7 +359,7 @@ export default function Dash() {
     if (error) { setMsg(`Couldn’t save your confirmation: ${error.message}.`); return; }
     setClear(true); if (!hasCal) openCalibrate("play"); else setView("ready");
   }
-  async function startGame() {
+  async function startGame(tut = false) {
     if (!cal) { openCalibrate("play"); return; }
     setBusy(true); setMsg(null);
     try {
@@ -326,18 +369,19 @@ export default function Dash() {
       tracker.current = await createTracker(v, f => { latest.current = f; });
       const wh = clamp(Math.round(W * innerHeight / innerWidth), 560, 800), sc = Math.min(innerWidth / W, innerHeight / wh);
       cfg.current = { len: st.len, start: st.start, ramp: st.ramp, gain: 1.3, haptics: st.haptics }; liveGain.current = 1.3; setGainUi(1.3);
-      g.current = fresh(wh); setBox({ w: W * sc, h: wh * sc });
-      setUi(u => ({ ...u, stage: "ready", ready: 6, left: st.len, dist: 0, coins: 0, mul: 1, adjust: false, paused: false, hint: "", stumble: false })); setView("play");
+      g.current = fresh(wh); if (tut) { g.current.tut = 0; g.current.readyLeft = 4; } setBox({ w: W * sc, h: wh * sc });
+      setUi(u => ({ ...u, stage: "ready", ready: 6, left: st.len, dist: 0, coins: 0, mul: 1, adjust: false, paused: false, hint: "", stumble: false, points: 0, lives: 3, tut: tut ? 0 : -1, tutText: "" })); setView("play");
     } catch (e: any) { stop(); setMsg(e?.name === "NotAllowedError" ? "Camera access is blocked. Allow it in your browser’s site settings, then try again." : `Couldn’t start the camera: ${e?.message ?? e}`); setView("hub"); }
     setBusy(false);
   }
-  async function finish(completed: boolean) {
+  function finishTutorial() { stop(); setMsg("Tutorial complete. You’re ready to run."); setView("hub"); }
+  async function finish(completed: boolean, caught = false) {
     const s = g.current; stop();
-    const r: Result = { points: s.points, distance: Math.round(s.dist), coins: s.coinsGot, cleared: s.cleared, stumbles: s.stumbles, bestStreak: s.best, topSpeed: Math.round(s.top * 10) / 10, seconds: Math.round(s.t), completed, counts: { ...s.counts }, saved: false };
+    const r: Result = { points: s.points, distance: Math.round(s.dist), coins: s.coinsGot, cleared: s.cleared, stumbles: s.stumbles, bestStreak: s.best, topSpeed: Math.round(s.top * 10) / 10, seconds: Math.round(s.t), completed, caught, counts: { ...s.counts }, saved: false };
     setResult(r); setView("results");
     try {
       const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) return;
-      const { error } = await sb.from("dash_games").insert({ user_id: user.id, duration_seconds: r.seconds, points: r.points, distance: r.distance, coins: r.coins, cleared: r.cleared, stumbles: r.stumbles, best_streak: r.bestStreak, top_speed: r.topSpeed, completed, per_move: { counts: s.counts, clearedBy: s.clearedBy, stumbledBy: s.stumbledBy }, settings: { len: cfg.current.len, start: cfg.current.start, ramp: cfg.current.ramp } });
+      const { error } = await sb.from("dash_games").insert({ user_id: user.id, duration_seconds: r.seconds, points: r.points, distance: r.distance, coins: r.coins, cleared: r.cleared, stumbles: r.stumbles, best_streak: r.bestStreak, top_speed: r.topSpeed, completed, per_move: { caught, counts: s.counts, clearedBy: s.clearedBy, stumbledBy: s.stumbledBy }, settings: { len: cfg.current.len, start: cfg.current.start, ramp: cfg.current.ramp } });
       if (error) { setMsg(`This run couldn’t be saved: ${error.message}`); return; }
       setResult(x => x && { ...x, saved: true });
     } catch (e: any) { setMsg(`This run couldn’t be saved: ${e?.message ?? e}`); }
@@ -368,23 +412,26 @@ export default function Dash() {
         s.lev[m] += (l - s.lev[m]) * .5; const was = s.on[m], on = was ? s.lev[m] >= .3 : s.lev[m] >= .55; s.on[m] = on; edge[m] = on && !was;
       }
       if (s.stage === "ready") { s.readyLeft -= dt; if (s.readyLeft <= 0) { s.stage = "play"; if (cfg.current.haptics) buzz(150); } return; }
+      if (s.caught > 0) { s.caught -= dt; s.dist += s.speed * Math.max(0, s.caught) / 1.2 * dt; s.bearT = 9; if (s.caught <= 0 && !finished) { finished = true; s.stage = "done"; finish(false, true); } return; }
       const { len, start, ramp } = cfg.current;
       s.t += dt; const prog = clamp(s.t / len, 0, 1);
       s.mul += (1 - s.mul) * Math.min(1, dt * .7);
-      const base = start * (1 + (ramp - 1) * prog), v = base * s.mul; s.speed = v; s.top = Math.max(s.top, base); s.dist += v * dt;
-      s.cd -= dt; s.invuln = Math.max(0, s.invuln - dt);
+      const base = s.tut >= 0 ? 9 : start * (1 + (ramp - 1) * prog), v = base * s.mul; s.speed = v; s.top = Math.max(s.top, base); s.dist += v * dt;
+      s.cd -= dt; s.invuln = Math.max(0, s.invuln - dt); s.flyLock = Math.max(0, s.flyLock - dt); s.bearT = Math.max(0, s.bearT - dt);
       for (const m of MOVES) s.pend[m] = edge[m] ? .35 : Math.max(0, s.pend[m] - dt);
-      if (s.cd <= 0 && s.pend.right > 0 && s.lane < 2) { s.lane++; s.cd = .2; s.counts.right++; s.pend.right = 0; }
-      else if (s.cd <= 0 && s.pend.left > 0 && s.lane > 0) { s.lane--; s.cd = .2; s.counts.left++; s.pend.left = 0; }
-      if (s.pend.jump > 0 && s.jet < .3) { s.crouchT = 0; if (s.jumpT <= 0) { s.jumpT = .7; s.counts.jump++; s.pend.jump = 0; } }
-      if (s.pend.duck > 0 && s.jet < .3) { s.jumpT = 0; s.crouchT = .55; s.counts.duck++; s.pend.duck = 0; }
+      if (s.cd <= 0 && s.pend.right > 0 && s.lane < 2) { s.lane++; s.cd = .12; s.counts.right++; s.pend.right = 0; }
+      else if (s.cd <= 0 && s.pend.left > 0 && s.lane > 0) { s.lane--; s.cd = .12; s.counts.left++; s.pend.left = 0; }
+      if (edge.fly && s.flyLock <= 0 && s.fuel > 0) { s.jumpT = 0; s.crouchT = 0; s.pend.jump = 0; s.pend.duck = 0; s.hold = 0; }
+      if (s.pend.jump > 0) { s.crouchT = 0; if (s.jet > .05) { s.jet = 0; s.flyLock = .4; } if (s.jumpT <= 0) { s.jumpT = .7; s.counts.jump++; s.pend.jump = 0; } }
+      if (s.pend.duck > 0) { s.jumpT = 0; s.hold = 0; if (s.jet > .05) { s.jet = 0; s.flyLock = .4; } s.crouchT = .55; s.counts.duck++; s.pend.duck = 0; }
       else if (s.on.duck && s.crouchT > 0) s.crouchT = Math.max(s.crouchT, .15);
+      if (!s.on.jump) s.hold = 0; else if (s.jumpT > 0 && s.jumpT < .36 && s.hold < 1.8 && s.jet < .3) { s.jumpT = .36; s.hold += dt; }
       s.crouchT = Math.max(0, s.crouchT - dt); s.jumpT = Math.max(0, s.jumpT - dt);
-      if (s.on.fly && s.fuel > 0) { if (edge.fly) s.counts.fly++; s.jet = Math.min(1.1, s.jet + dt * 4); s.fuel -= dt / 2.6; }
+      if (s.on.fly && s.fuel > 0 && s.flyLock <= 0) { if (edge.fly) s.counts.fly++; s.jet = Math.min(1.1, s.jet + dt * 4); s.fuel -= dt / 2.6; }
       else { s.jet = Math.max(0, s.jet - dt * 3.5); if (!s.on.fly) s.fuel = Math.min(1, s.fuel + dt / 5); }
       const jumpH = s.jumpT > 0 ? Math.sin(Math.PI * (1 - s.jumpT / .7)) : 0, h = Math.max(jumpH, Math.min(1, s.jet)), crouch = s.crouchT > 0 && h < .1;
       s.lanePos += (s.lane - s.lanePos) * Math.min(1, dt * 10);
-      while (s.spawnZ < s.dist + 95) spawnRow(s, len);
+      if (s.tut >= 0) tutSpawn(s, dt); else while (s.spawnZ < s.dist + 95) spawnRow(s, len);
       let hint = "";
       for (const r of s.rows) {
         const dd = r.z - s.dist;
@@ -392,26 +439,28 @@ export default function Dash() {
         if (!r.zone && dd < 1.2 && dd > -1.2) r.zone = true;
         if (r.zone && !r.hit && dd > -1 && dd < .9 && s.invuln <= 0 && r.lanes.some(l => Math.abs(s.lanePos - l) < .55)) {
           const hit = r.kind === "hurdle" ? h < .5 : r.kind === "bar" ? !crouch && s.jet < .8 : s.jet < .8;
-          if (hit) { r.hit = true; s.mul = .6; s.invuln = 1.8; s.streak = 0; { const gap = base * 1.4; for (const q of s.rows) if (q !== r && q.z - s.dist > 2) q.z += gap; for (const c2 of s.coins) if (c2.z - s.dist > 2) c2.z += gap; s.spawnZ += gap; } s.stumbles++; s.stumbledBy[r.kind] = (s.stumbledBy[r.kind] ?? 0) + 1; if (cfg.current.haptics) buzz(90); }
+          if (hit) { r.hit = true; s.mul = .6; s.streak = 0; if (s.tut >= 0) { s.invuln = .8; s.tutHit = true; if (cfg.current.haptics) buzz(60); } else { s.invuln = 1.8; { const gap = base * 1.4; for (const q of s.rows) if (q !== r && q.z - s.dist > 2) q.z += gap; for (const c2 of s.coins) if (c2.z - s.dist > 2) c2.z += gap; s.spawnZ += gap; } s.stumbles++; s.stumbledBy[r.kind] = (s.stumbledBy[r.kind] ?? 0) + 1; s.bearT = 2.8; if (s.stumbles >= 3) s.caught = 1.2; if (cfg.current.haptics) buzz(s.stumbles >= 3 ? [120, 60, 200] : 90); } }
         }
         if (!r.done && dd < -1.2) { r.done = true; if (!r.hit && r.threat) { s.cleared++; s.points += 10; s.streak++; s.best = Math.max(s.best, s.streak); s.clearedBy[r.kind] = (s.clearedBy[r.kind] ?? 0) + 1; } }
         if (!hint && !r.done && dd > 0 && dd < 45 && r.lanes.includes(s.lane) && !r.hit) {
-          if (r.kind === "hurdle") hint = "Smile to jump";
-          else if (r.kind === "bar") hint = "Frown to duck";
+          if (r.kind === "hurdle") hint = r.hold ? "Hold your smile" : "Smile to jump";
+          else if (r.kind === "bar") hint = r.hold ? "Hold your frown" : "Frown to duck";
           else if (r.kind === "full") hint = "Raise your eyebrows to fly";
           else { const free = [0, 1, 2].filter(l => !r.lanes.includes(l)).sort((a, b) => Math.abs(a - s.lane) - Math.abs(b - s.lane))[0]; hint = free == null ? "Raise your eyebrows to fly" : free > s.lane ? "Pucker to your right" : "Pucker to your left"; }
         }
       }
+      if (s.tut >= 0) hint = s.tut >= TUT.length ? "Tutorial complete" : s.tutFlash || TUT[s.tut].text;
       s.hint = hint;
+      if (s.tut >= TUT.length && s.tutWait <= 0 && !finished) { finished = true; s.stage = "done"; finishTutorial(); }
       for (const c of s.coins) if (!c.got) { const dd = c.z - s.dist; if (dd < .9 && dd > -.9 && Math.abs(s.lanePos - c.lane) < .6 && Math.abs(h - c.cy) < .5) { c.got = true; s.coinsGot++; s.points += 5; } }
       s.points = Math.max(s.points, 0);
       if (s.rows.length > 14) s.rows = s.rows.filter(r => r.z - s.dist > -8);
       if (s.coins.length > 60) s.coins = s.coins.filter(c => c.z - s.dist > -8);
-      if (s.t >= len && !finished) { finished = true; s.stage = "done"; finish(true); }
+      if (s.tut < 0 && s.t >= len && !finished) { finished = true; s.stage = "done"; finish(true); }
     };
     const loop = (now: number) => { raf = requestAnimationFrame(loop); const dt = Math.min(.05, (now - prev) / 1000); prev = now; step(dt, now); drawWorld(ctx, g.current, now); };
     raf = requestAnimationFrame(loop);
-    const id = setInterval(() => { const s = g.current; setUi(u => ({ ...u, stage: s.stage, ready: Math.max(0, Math.ceil(s.readyLeft)), left: Math.max(0, Math.ceil(cfg.current.len - s.t)), dist: Math.round(s.dist), coins: s.coinsGot, mul: Math.round(s.speed / cfg.current.start * 10) / 10, adjust: s.adjust, paused: s.manual, hint: s.hint, lev: { ...s.lev }, on: { ...s.on }, stumble: s.invuln > 0 })); }, 100);
+    const id = setInterval(() => { const s = g.current; setUi(u => ({ ...u, stage: s.stage, ready: Math.max(0, Math.ceil(s.readyLeft)), left: Math.max(0, Math.ceil(cfg.current.len - s.t)), dist: Math.round(s.dist), coins: s.coinsGot, mul: Math.round(s.speed / cfg.current.start * 10) / 10, adjust: s.adjust, paused: s.manual, hint: s.hint, lev: { ...s.lev }, on: { ...s.on }, stumble: s.invuln > 0, points: s.points, lives: Math.max(0, 3 - s.stumbles), tut: s.tut, tutText: s.hint })); }, 100);
     return () => { cancelAnimationFrame(raf); clearInterval(id); removeEventListener("resize", fit); document.body.style.overflow = prevScroll; };
   }, [view]);
 
@@ -443,7 +492,7 @@ export default function Dash() {
   const ios = typeof navigator !== "undefined" && /iPhone|iPad/.test(navigator.userAgent) && !(navigator as any).standalone;
   const videoEl = <video ref={video} playsInline muted aria-label="Your camera preview (mirrored)"
     className={view === "play" && preview ? "fixed z-40 -scale-x-100 rounded-2xl object-cover shadow-soft" : "pointer-events-none fixed left-0 top-0 h-1 w-1 opacity-[0.02]"}
-    style={view === "play" && preview ? { right: 12, top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 8}px)`, width: 84, height: 63 } : undefined} />;
+    style={view === "play" && preview ? { right: 12, top: "calc(env(safe-area-inset-top, 0px) + 112px)", width: 84, height: 63 } : undefined} />;
   const choice = (on: boolean) => `rounded-2xl border ${on ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`;
 
   const body = () => {
@@ -463,9 +512,9 @@ export default function Dash() {
       <Page><h1 className="font-display text-3xl">How to play</h1><Rule />
         <p className="mt-2 text-navy/70">Your runner keeps running. Use these five movements to dodge, jump and fly. The run gets faster as it goes.</p>
         <ul className="mt-4 grid gap-2">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded-2xl bg-paper p-3 shadow-soft"><Rune m={m} size={44} /><span className="flex-1"><b>{INFO[m].action}</b><br /><span className="text-sm text-navy/70">{INFO[m].name}</span></span></li>)}</ul>
-        <p className="mt-3 text-xs text-navy/60">Bumps never end your run. You just stumble and slow down for a moment.</p>
+        <p className="mt-3 text-xs text-navy/60">Hold your smile or frown to cross a row of obstacles. Three stumbles and the bear catches up, so go gently.</p>
         {msg && <p role="alert" className="mt-3 rounded-2xl bg-lav/50 p-3 text-sm">{msg}</p>}
-        <button className="btn-primary mt-5 min-h-[64px] w-full text-xl" disabled={busy} onClick={startGame}>{busy ? "Starting camera…" : "Start running"}</button>
+        <button className="btn-primary mt-5 min-h-[64px] w-full text-xl" disabled={busy} onClick={() => startGame()}>{busy ? "Starting camera…" : "Start running"}</button>
         <button className="btn-quiet mt-3 w-full" onClick={() => setView("hub")}>Back</button></Page>);
 
     if (view === "calibrate") {
@@ -544,8 +593,8 @@ export default function Dash() {
     if (view === "results" && result) {
       const R = result;
       return (
-        <Page><h1 className="font-display text-3xl">{R.completed ? "Run complete." : "Run ended early."}</h1><Rule />
-          <p className="mt-2 text-navy/70">Nice work. Every run counts.</p>
+        <Page><h1 className="font-display text-3xl">{R.completed ? "Run complete." : R.caught ? "The bear caught up." : "Run ended early."}</h1><Rule />
+          <p className="mt-2 text-navy/70">{R.caught ? "Three stumbles and it caught up. Every run is practice." : "Nice work. Every run counts."}</p>
           <div className="mt-5 grid grid-cols-2 gap-3">{([["Points", String(R.points)], ["Distance", `${R.distance} m`], ["Coins", String(R.coins)], ["Obstacles cleared", String(R.cleared)], ["Stumbles", String(R.stumbles)], ["Top speed", `${R.topSpeed.toFixed(1)}`]] as [string, string][]).map(([k, v]) => <div key={k} className="rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-3xl">{v}</div><div className="text-xs text-navy/60">{k}</div></div>)}
             <div className="col-span-2 rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-3xl">{R.bestStreak}</div><div className="text-xs text-navy/60">Best streak (obstacles cleared in a row)</div></div></div>
           <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">Movements made</h2>
@@ -561,18 +610,18 @@ export default function Dash() {
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" style={{ width: box.w, height: box.h }}>
           <canvas ref={cvRef} style={{ width: "100%", height: "100%" }} aria-label="Three-lane runner. Use your facial movements to dodge, jump, duck and fly." />
         </div>
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center">
-          <div className="w-full rounded-b-2xl border-b border-x border-[#8fd0ff]/40 bg-[#0f1038]/80 shadow-soft backdrop-blur" style={{ maxWidth: Math.max(box.w, 320), paddingTop: "env(safe-area-inset-top, 0px)" }}>
-            <div className="flex items-center justify-between gap-2 px-5" style={{ height: TOPBAR }} role="status">
-              <div><div className="dt-h text-4xl leading-none text-[#bfe6ff]">{ui.dist}<span className="ml-1 text-sm text-[#a9a8d6]">m</span></div><div className="mt-1 text-[11px] uppercase tracking-widest text-[#a9a8d6]">Speed ×{ui.mul.toFixed(1)}</div></div>
-              <div className="text-center"><div className="flex items-center justify-center gap-1.5 dt-h text-3xl leading-none text-[#eceaff]"><Coin size={26} /> {ui.coins}</div><div className="mt-1 text-[11px] uppercase tracking-widest text-[#a9a8d6]">Relics</div></div>
-              <div className="relative grid h-16 w-16 shrink-0 place-items-center" aria-label={`${ui.left} seconds left`}>
-                <svg width="64" height="64" viewBox="0 0 64 64" className="absolute inset-0 -rotate-90" aria-hidden><circle cx="32" cy="32" r="28" fill="none" stroke="#2c2f78" strokeWidth="5" /><circle cx="32" cy="32" r="28" fill="none" stroke="#8fd0ff" strokeWidth="5" strokeLinecap="round" strokeDasharray={175.9} strokeDashoffset={175.9 * (1 - ui.left / cfg.current.len)} /></svg>
-                <span className="dt-h text-xl text-[#eceaff]">{ui.left}</span></div>
-            </div></div></div>
-        {st.hints && ui.stage === "play" && ui.hint && <div className="pointer-events-none absolute inset-x-0 z-20 flex justify-center px-4" style={{ top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 10}px)` }}><div className="rounded-full border border-[#8fd0ff]/60 bg-[#0f1038]/85 px-5 py-2 dt-h text-lg tracking-wide text-[#eceaff] shadow-soft" role="status">{ui.hint}</div></div>}
-        {ui.stumble && ui.stage === "play" && <div className="pointer-events-none absolute inset-x-0 z-20 text-center text-sm font-semibold text-[#eceaff]" style={{ top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 56}px)` }}>Stumble. Keep going!</div>}
-        <button aria-label="Pause" onClick={() => { g.current.manual = true; }} className="absolute z-20 grid h-14 w-14 place-items-center rounded-full border border-[#8fd0ff]/40 bg-[#0f1038]/80 shadow-soft" style={{ left: 12, top: `calc(env(safe-area-inset-top, 0px) + ${TOPBAR + 10}px)` }}>
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 10px)" }}>
+          <div className="relative w-full" style={{ maxWidth: Math.max(box.w, 320), height: 96 }}>
+            {ui.tut < 0 ? <div className="absolute right-3 top-0 min-w-[104px] rounded-2xl border border-[#8fd0ff]/40 bg-[#0f1038]/80 px-3 py-2 text-right shadow-soft backdrop-blur" role="status">
+              <div className="dt-h text-3xl leading-none text-[#eceaff]">{ui.points}</div><div className="text-[10px] uppercase tracking-widest text-[#a9a8d6]">Score</div>
+              <div className="mt-1 flex items-center justify-end gap-1.5 dt-h text-lg leading-none text-[#eceaff]"><Coin size={18} /> {ui.coins}</div>
+              <div className="mt-1 text-[10px] uppercase tracking-widest text-[#a9a8d6]">{ui.dist} m · {ui.left}s</div></div>
+              : <div className="absolute right-3 top-0 rounded-2xl border border-[#8fd0ff]/40 bg-[#0f1038]/80 px-3 py-2 text-right shadow-soft" role="status"><div className="dt-h text-lg text-[#eceaff]">Tutorial</div><div className="text-[10px] uppercase tracking-widest text-[#a9a8d6]">{Math.min(ui.tut + 1, TUT.length)} of {TUT.length}</div></div>}
+            {ui.tut < 0 && <div className="absolute left-3 top-[64px] flex gap-1" aria-label={`${ui.lives} of 3 chances left`}>{[0, 1, 2].map(i => <svg key={i} width="22" height="20" viewBox="0 0 24 22" aria-hidden><path d="M12 21C5 15 1 11.5 1 7.2 1 4 3.4 2 6.2 2c2.3 0 4.2 1.2 5.8 3.3C13.600 3.200 15.500 2 17.800 2 20.600 2 23 4 23 7.200 23 11.500 19 15 12 21z" fill={i < ui.lives ? "#ff7a9c" : "none"} stroke="#ff7a9c" strokeOpacity={i < ui.lives ? 1 : .45} strokeWidth="1.6" /></svg>)}</div>}
+          </div></div>
+        {(st.hints || ui.tut >= 0) && ui.stage === "play" && ui.hint && <div className="pointer-events-none absolute inset-x-0 z-20 flex justify-center" style={{ top: "calc(env(safe-area-inset-top, 0px) + 10px)" }}><div className="w-[44%] rounded-2xl border border-[#8fd0ff]/60 bg-[#0f1038]/85 px-3 py-2 text-center dt-h text-sm leading-snug tracking-wide text-[#eceaff] shadow-soft" role="status">{ui.hint}</div></div>}
+        {ui.stumble && ui.stage === "play" && ui.tut < 0 && <div className="pointer-events-none absolute inset-x-0 z-20 text-center text-sm font-semibold text-[#eceaff]" style={{ top: "calc(env(safe-area-inset-top, 0px) + 84px)" }}>Keep going!</div>}
+        <button aria-label="Pause" onClick={() => { g.current.manual = true; }} className="absolute z-20 grid h-14 w-14 place-items-center rounded-full border border-[#8fd0ff]/40 bg-[#0f1038]/80 shadow-soft" style={{ left: 12, top: "calc(env(safe-area-inset-top, 0px) + 10px)" }}>
           <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden><rect x="4" y="3" width="5" height="16" rx="1.5" fill="#8fd0ff" /><rect x="13" y="3" width="5" height="16" rx="1.5" fill="#8fd0ff" /></svg></button>
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center pb-[max(10px,env(safe-area-inset-bottom))]"><div className="grid w-full grid-cols-5 gap-1.5 px-2" style={{ maxWidth: Math.max(box.w, 320) }}>
           {MOVES.map(m => <div key={m} className={`flex flex-col items-center rounded border px-1 py-2 text-center text-[11px] leading-tight shadow-soft ${ui.on[m] ? "border-[#bfe6ff] bg-[#8fd0ff] text-[#0f1038]" : "border-[#8fd0ff]/30 bg-[#0f1038]/80 text-[#d6d4ff]"}`}><Rune m={m} size={30} on={ui.on[m]} tone="#8fd0ff" /><span className="mt-0.5 whitespace-pre-line">{SHORT[m]}</span>
@@ -591,7 +640,7 @@ export default function Dash() {
             <div className="mt-2 grid grid-cols-2 gap-2"><button className="btn-quiet min-h-[48px]" onClick={() => { const v = GAINS[Math.min(4, Math.max(0, GAINS.indexOf(gainUi)) + 1)]; liveGain.current = v; setGainUi(v); }}>Easier</button>
               <button className="btn-quiet min-h-[48px]" onClick={() => { const v = GAINS[Math.max(0, Math.max(0, GAINS.indexOf(gainUi)) - 1)]; liveGain.current = v; setGainUi(v); }}>Harder</button></div></div>
           <button className="btn-quiet mt-3 w-full" onClick={() => setPreview(p => !p)}>{preview ? "Hide camera preview" : "Show camera preview"}</button>
-          <button className="btn-quiet mt-3 w-full" onClick={() => finish(false)}>End run</button></div></div>}
+          <button className="btn-quiet mt-3 w-full" onClick={() => { if (g.current.tut >= 0) { stop(); setView("hub"); } else finish(false); }}>End run</button></div></div>}
       </div>);
 
     // hub
@@ -608,7 +657,7 @@ export default function Dash() {
             {msg && <p role="alert" className="mt-3 rounded-2xl bg-[#3f0f7f] p-3 text-sm">{msg}</p>}
             <button className="btn-primary mt-5 min-h-[64px] w-full text-lg uppercase tracking-[.16em]" onClick={onPlay}>Play game</button>
             {!hasCal && <p className="mt-2 text-center text-xs text-[#a9a8d6]">First time? We’ll set up your camera next.</p>}
-            <div className="mt-3 grid grid-cols-2 gap-3"><button className="btn-quiet min-h-[56px] !border-white/25 !bg-black/40 !text-white" onClick={openStats}>Stats</button><button className="btn-quiet min-h-[56px] !border-white/25 !bg-black/40 !text-white" onClick={() => setView("settings")}>Settings</button></div>
+            <div className="mt-3 grid grid-cols-3 gap-3"><button className="btn-quiet min-h-[56px] !border-white/25 !bg-black/40 !text-white" disabled={busy} onClick={onTutorial}>Tutorial</button><button className="btn-quiet min-h-[56px] !border-white/25 !bg-black/40 !text-white" onClick={openStats}>Stats</button><button className="btn-quiet min-h-[56px] !border-white/25 !bg-black/40 !text-white" onClick={() => setView("settings")}>Settings</button></div>
             {ios && <p className="mt-4 rounded-2xl bg-black/50 p-3 text-xs text-[#d6d4ff]">For the full-screen version on iPhone: tap the Share button in Safari, choose <b>Add to Home Screen</b>, then open SmileQuest from your home screen.</p>}
           </div>
         </div>
