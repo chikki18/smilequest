@@ -1,96 +1,92 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AnimatePresence, motion } from "framer-motion";
 import { supabase } from "@/lib/supabase/client";
-import { AGE, US_STATES, TYPES, SIDES, SURGERY, GOALS, POLICY_VERSION } from "@/lib/onboarding";
+import { POLICY_VERSION } from "@/lib/onboarding";
 
-type A = { age: string; state: string; type: string; side: string; surgery: string; surgeryDate: string; notes: string; goals: string[] };
-const TITLES = ["How old are you?", "Where do you live?", "What type of facial palsy do you have?", "Which side is affected?", "What surgical treatment have you received?", "What would you like to work toward?"];
+const APPEARANCE = [
+  "I get upset when people stare at me", "I dislike how I look", "I avoid having my photo taken", "I feel unhappy about how I look", "I avoid looking at myself in the mirror",
+  "I cover up or hide how I look when I go out", "I avoid sharing photos of myself (eg. Instagram or Snapchat)", "I avoid going out because of how I look (like to a party)", "I feel self-conscious about how I look", "It’s hard to meet new people because of how I look",
+];
+const APPEARANCE_SCALE = ["Never", "Sometimes", "Often", "Always"];
+const SMILE = [
+  "how well your smile expresses how you feel?", "how your smile looks in the mirror?", "how big (wide) your smile looks?", "the shape of your smile (has a nice curve)?", "how even your smile looks (same on both sides)?",
+  "how straight your smile looks (not crooked or lopsided)?", "how your smile looks in photos?", "how your smile looks when your teeth show?", "how your smile looks compared with other people’s smiles?",
+];
+const SMILE_SCALE = ["Not at all", "A little bit", "Quite a bit", "Very much"];
+const BANDS: [number, string][] = [[18, "18-24"], [25, "25-34"], [35, "35-44"], [45, "45-54"], [55, "55-64"], [65, "65+"]];
+const ageOn = (dob: string) => { const d = new Date(dob + "T00:00:00"), n = new Date(); let a = n.getFullYear() - d.getFullYear(); if (n.getMonth() < d.getMonth() || (n.getMonth() === d.getMonth() && n.getDate() < d.getDate())) a--; return a; };
 
-function Choice({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
-  return <button type="button" role="radio" aria-checked={on} onClick={onClick}
-    className={`min-h-[56px] rounded-2xl border px-4 text-left transition ${on ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`}>{label}</button>;
+function Likert({ items, scale, value, onChange, lead }: { items: string[]; scale: string[]; value: (number | null)[]; onChange: (i: number, v: number) => void; lead?: string }) {
+  return (
+    <div className="mt-5 grid gap-3">
+      {items.map((q, i) => (
+        <fieldset key={q} className="rounded-2xl border border-navy/10 bg-paper p-4 shadow-soft">
+          <legend className="sr-only">{lead ? `${lead} ${q}` : q}</legend>
+          <p className="font-medium leading-snug">{lead && <span className="text-navy/60">{lead} </span>}{q}</p>
+          <div className="mt-3 grid grid-cols-4 gap-1.5" role="radiogroup" aria-label={q}>
+            {scale.map((l, v) => <button key={l} type="button" role="radio" aria-checked={value[i] === v} onClick={() => onChange(i, v)}
+              className={`min-h-[52px] rounded-xl border px-1 text-[12px] leading-tight transition ${value[i] === v ? "border-teal bg-teal text-white shadow-soft" : "border-navy/15 bg-ivory text-navy/80"}`}>{l}</button>)}
+          </div>
+        </fieldset>))}
+    </div>);
 }
 
 export default function Onboarding() {
   const router = useRouter();
-  const [i, setI] = useState(0); const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null);
-  const [a, setA] = useState<A>({ age: "", state: "", type: "", side: "", surgery: "", surgeryDate: "", notes: "", goals: [] });
-  const set = <K extends keyof A>(k: K, v: A[K]) => setA(p => ({ ...p, [k]: v }));
-  const [under18, setUnder18] = useState(false);
+  const [i, setI] = useState(0), [busy, setBusy] = useState(false), [err, setErr] = useState<string | null>(null), [young, setYoung] = useState(false);
+  const [first, setFirst] = useState(""), [last, setLast] = useState(""), [dob, setDob] = useState("");
+  const [ap, setAp] = useState<(number | null)[]>(APPEARANCE.map(() => null)), [sm, setSm] = useState<(number | null)[]>(SMILE.map(() => null));
+  const today = new Date().toISOString().slice(0, 10);
+  const dobOk = !!dob && dob <= today && dob > "1900-01-01";
+  const ready = [first.trim() && last.trim() && dobOk, ap.every(v => v !== null), sm.every(v => v !== null)][i];
+  const done = i === 1 ? ap.filter(v => v !== null).length : i === 2 ? sm.filter(v => v !== null).length : 0;
+  const TITLES = ["About you", "How you feel about your appearance", "How you feel about your smile"];
 
-  const ready = [a.age, a.state, a.type, a.side, a.surgery, a.goals.length ? "y" : ""][i];
-
+  function next() {
+    if (i === 0 && ageOn(dob) < 18) { setYoung(true); return; }
+    if (i < 2) { setI(i + 1); window.scrollTo(0, 0); } else finish();
+  }
   async function finish() {
     setBusy(true); setErr(null);
-    const sb = supabase();
-    const { data: { user } } = await sb.auth.getUser();
-    if (!user) { router.push("/"); return; }
-    const uid = user.id;
-    const steps = [
-      sb.from("profiles").upsert({ id: uid, age_band: a.age, state_of_residence: a.state, onboarding_completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }),
-    ];
-    const first = await steps[0];
-    if (first.error) { setErr(first.error.message); setBusy(false); return; }
-    const results = await Promise.all([
-      sb.from("palsy_conditions").upsert({ user_id: uid, palsy_type: a.type, affected_side: a.side, updated_at: new Date().toISOString() }, { onConflict: "user_id" }),
-      sb.from("surgical_history").delete().eq("user_id", uid).then(() =>
-        sb.from("surgical_history").insert({ user_id: uid, procedure: a.surgery, surgery_date: a.surgeryDate || null, notes: a.notes || null })),
-      sb.from("rehab_goals").delete().eq("user_id", uid).then(() =>
-        sb.from("rehab_goals").insert(a.goals.map(goal => ({ user_id: uid, goal })))),
-      sb.from("consent_records").insert([{ user_id: uid, kind: "terms", granted: true, policy_version: POLICY_VERSION }, { user_id: uid, kind: "privacy", granted: true, policy_version: POLICY_VERSION }]),
+    const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) { router.push("/"); return; }
+    const age = ageOn(dob), band = [...BANDS].reverse().find(([min]) => age >= min)![1], now = new Date().toISOString();
+    const p = await sb.from("profiles").upsert({ id: user.id, first_name: first.trim(), last_name: last.trim(), date_of_birth: dob, age_band: band, state_of_residence: "Not provided", onboarding_completed_at: now, updated_at: now });
+    if (p.error) { setErr(p.error.message + " (Run the 0008 database step in Supabase.)"); setBusy(false); return; }
+    const pack = (items: string[], vals: (number | null)[]) => items.map((q, n) => ({ q, v: vals[n] }));
+    const sum = (vals: (number | null)[]) => vals.reduce<number>((a, b) => a + (b ?? 0), 0);
+    const rs = await Promise.all([
+      sb.from("questionnaire_responses").insert([{ user_id: user.id, instrument: "appearance_baseline", answers: pack(APPEARANCE, ap), total_score: sum(ap) }, { user_id: user.id, instrument: "smile_baseline", answers: pack(SMILE, sm), total_score: sum(sm) }]),
+      sb.from("consent_records").insert([{ user_id: user.id, kind: "terms", granted: true, policy_version: POLICY_VERSION }, { user_id: user.id, kind: "privacy", granted: true, policy_version: POLICY_VERSION }]),
     ]);
-    const bad = results.find(r => r.error);
-    if (bad?.error) { setErr(bad.error.message); setBusy(false); return; }
-    router.push("/dashboard");
+    const bad = rs.find(r => r.error); if (bad?.error) { setErr(bad.error.message); setBusy(false); return; }
+    router.push("/calibrate?first=1&next=/dashboard");
   }
 
-  if (under18) return (
-    <main className="mx-auto max-w-md px-6 pt-24">
-      <h1 className="font-display text-3xl">A pathway for younger patients is on the way.</h1>
+  if (young) return (
+    <main className="mx-auto max-w-md px-6 pt-24"><h1 className="font-display text-3xl">A pathway for younger patients is on the way.</h1>
       <p className="mt-4 text-navy/70">SmileQuest is currently available for adults (18+). Please check with your care team about exercises that suit you now.</p>
-      <button className="btn-quiet mt-8" onClick={() => { setUnder18(false); }}>Back</button>
-    </main>
-  );
+      <button className="btn-quiet mt-8" onClick={() => setYoung(false)}>Back</button></main>);
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))]">
-      <div className="flex gap-1.5" role="progressbar" aria-valuemin={1} aria-valuemax={6} aria-valuenow={i + 1} aria-label={`Question ${i + 1} of 6`}>
-        {TITLES.map((_, n) => <div key={n} className={`h-1.5 flex-1 rounded-full ${n <= i ? "bg-teal" : "bg-mist"}`} />)}
+      <div className="flex gap-1.5" role="progressbar" aria-valuemin={1} aria-valuemax={3} aria-valuenow={i + 1} aria-label={`Part ${i + 1} of 3`}>{TITLES.map((_, n) => <div key={n} className={`h-1.5 flex-1 rounded-full ${n <= i ? "bg-teal" : "bg-navy/15"}`} />)}</div>
+      <p className="mt-6 text-xs uppercase tracking-[.3em] text-teal">Welcome to SmileQuest</p>
+      <h1 className="mt-2 font-display text-3xl leading-tight">{TITLES[i]}</h1>
+      {i === 0 && <section className="mt-5 grid gap-4">
+        <p className="text-navy/70">Let’s start with a few details. Your care team uses them to match your account to you.</p>
+        <label className="text-sm">First name<input className="field mt-1" autoComplete="given-name" value={first} onChange={e => setFirst(e.target.value)} /></label>
+        <label className="text-sm">Last name<input className="field mt-1" autoComplete="family-name" value={last} onChange={e => setLast(e.target.value)} /></label>
+        <label className="text-sm">Date of birth<input type="date" className="field mt-1" autoComplete="bday" max={today} value={dob} onChange={e => setDob(e.target.value)} /></label>
+      </section>}
+      {i === 1 && <><p className="mt-3 text-navy/70">Think about the past few weeks. How often do these statements apply to you? There are no right or wrong answers.</p><p className="mt-2 text-xs text-navy/60">{done} of {APPEARANCE.length} answered</p>
+        <Likert items={APPEARANCE} scale={APPEARANCE_SCALE} value={ap} onChange={(n, v) => setAp(a => a.map((x, k) => (k === n ? v : x)))} /></>}
+      {i === 2 && <><p className="mt-3 text-navy/70">How much do you like…</p><p className="mt-2 text-xs text-navy/60">{done} of {SMILE.length} answered</p>
+        <Likert items={SMILE} scale={SMILE_SCALE} value={sm} onChange={(n, v) => setSm(a => a.map((x, k) => (k === n ? v : x)))} lead="…" /></>}
+      {err && <p role="alert" className="mt-4 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
+      <div className="sticky bottom-0 mt-6 flex gap-3 bg-gradient-to-t from-ivory via-ivory to-transparent pb-1 pt-4">
+        {i > 0 && <button className="btn-quiet" onClick={() => { setI(i - 1); window.scrollTo(0, 0); }}>Back</button>}
+        <button className="btn-primary flex-1" disabled={!ready || busy} onClick={next}>{busy ? "Saving…" : i < 2 ? "Continue" : "Finish and set up camera"}</button>
       </div>
-      <AnimatePresence mode="wait">
-        <motion.section key={i} initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={{ duration: .25 }} className="mt-10 flex-1">
-          <h1 className="font-display text-3xl leading-tight">{TITLES[i]}</h1>
-          <div className="mt-6 grid gap-3" role="radiogroup" aria-label={TITLES[i]}>
-            {i === 0 && <>
-              {AGE.map(v => <Choice key={v} label={v} on={a.age === v} onClick={() => set("age", v)} />)}
-              <button type="button" onClick={() => setUnder18(true)} className="min-h-[56px] rounded-2xl border border-dashed border-navy/20 px-4 text-left text-navy/50">Under 18 (not yet available)</button>
-            </>}
-            {i === 1 && <select aria-label="State of residence" className="field" value={a.state} onChange={e => set("state", e.target.value)}>
-              <option value="">Select your state</option>{US_STATES.map(s => <option key={s}>{s}</option>)}</select>}
-            {i === 2 && TYPES.map(([k, l]) => <Choice key={k} label={l} on={a.type === k} onClick={() => set("type", k)} />)}
-            {i === 3 && SIDES.map(([k, l]) => <Choice key={k} label={l} on={a.side === k} onClick={() => set("side", k)} />)}
-            {i === 4 && <>
-              {SURGERY.map(([k, l]) => <Choice key={k} label={l} on={a.surgery === k} onClick={() => set("surgery", k)} />)}
-              {a.surgery && a.surgery !== "none" && a.surgery !== "unsure" && <div className="grid gap-3 rounded-2xl bg-lav/30 p-4">
-                <label className="text-sm">Approximate surgery date (optional)
-                  <input type="date" className="field mt-1" value={a.surgeryDate} onChange={e => set("surgeryDate", e.target.value)} /></label>
-                {a.surgery === "other_multiple" && <label className="text-sm">List your procedures (optional)
-                  <textarea className="field mt-1 py-3" rows={3} value={a.notes} onChange={e => set("notes", e.target.value)} /></label>}
-              </div>}
-            </>}
-            {i === 5 && GOALS.map(g => <button key={g} type="button" role="checkbox" aria-checked={a.goals.includes(g)}
-              onClick={() => set("goals", a.goals.includes(g) ? a.goals.filter(x => x !== g) : [...a.goals, g])}
-              className={`min-h-[56px] rounded-2xl border px-4 text-left transition ${a.goals.includes(g) ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`}>{g}</button>)}
-          </div>
-        </motion.section>
-      </AnimatePresence>
-      {err && <p role="alert" className="mb-3 text-sm">{err}</p>}
-      <div className="mt-6 flex gap-3">
-        {i > 0 && <button className="btn-quiet" onClick={() => setI(i - 1)}>Back</button>}
-        <button className="btn-primary flex-1" disabled={!ready || busy} onClick={() => (i < 5 ? setI(i + 1) : finish())}>{i < 5 ? "Continue" : "Save and continue"}</button>
-      </div>
-    </main>
-  );
+    </main>);
 }
