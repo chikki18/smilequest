@@ -52,8 +52,8 @@ export default function Calibrate() {
   const stream = useRef<MediaStream | null>(null), tracker = useRef<Awaited<ReturnType<typeof createTracker>> | null>(null), latest = useRef<Frame | null>(null);
   const [step, setStep] = useState<Step>("intro"), [cam, setCam] = useState<"off" | "loading" | "on">("off"), [err, setErr] = useState<string | null>(null);
   const [built, setBuilt] = useState<Built | null>(null), [saving, setSaving] = useState(false), [saved, setSaved] = useState(false);
-  const [hud, setHud] = useState({ aligned: false, locked: false, hint: "Looking for your face…", progress: 0, phase: "wait" as "wait" | "hold" | "flash", skipHint: false, face: false });
-  const S = useRef({ step: "intro" as Step, alignedSince: 0, lostSince: 0, locked: false, enteredAt: 0, phase: "wait" as "wait" | "hold" | "flash", over: 0, holdStart: 0, weakSince: 0, buf: [] as Vals[], restBuf: [] as Vals[], restMs: 0, last: 0, flashUntil: 0, bestKey: "sideA" as SK, rightKey: null as SK | null, neutral: null as Neutral | null, redo: false, samples: {} as Partial<Record<Id, Vals[]>>, progress: 0, hint: "", face: false, aligned: false, rough: false });
+  const [hud, setHud] = useState({ aligned: false, locked: false, hint: "Looking for your face…", progress: 0, phase: "brief" as "brief" | "count" | "hold" | "flash", skipHint: false, face: false, count: 0 as number });
+  const S = useRef({ step: "intro" as Step, alignedSince: 0, lostSince: 0, locked: false, enteredAt: 0, phase: "brief" as "brief" | "count" | "hold" | "flash", phaseStart: 0, lostAt: 0, fails: 0, skipBrief: false, over: 0, holdStart: 0, weakSince: 0, buf: [] as Vals[], restBuf: [] as Vals[], restMs: 0, last: 0, flashUntil: 0, bestKey: "sideA" as SK, rightKey: null as SK | null, neutral: null as Neutral | null, redo: false, samples: {} as Partial<Record<Id, Vals[]>>, progress: 0, hint: "", face: false, aligned: false, rough: false });
   const [first, setFirst] = useState(false); useEffect(() => { setFirst(new URLSearchParams(location.search).get("first") === "1"); }, []);
 
   useEffect(() => { (async () => { const { data: { user } } = await supabase().auth.getUser(); if (!user) location.href = "/"; })(); return () => stop(); }, []);
@@ -61,7 +61,7 @@ export default function Calibrate() {
   function nextUrl() { const n = new URLSearchParams(location.search).get("next"); return n && n.startsWith("/") && !n.startsWith("//") ? n : "/dashboard"; }
 
   function enter(s: Step) {
-    const r = S.current; r.step = s; r.enteredAt = performance.now(); r.phase = "wait"; r.over = 0; r.buf = []; r.progress = 0; r.weakSince = 0; r.restBuf = []; r.restMs = 0; r.flashUntil = 0;
+    const r = S.current; r.step = s; r.enteredAt = performance.now(); r.phase = "brief"; r.phaseStart = performance.now(); r.lostAt = 0; r.fails = 0; r.skipBrief = false; r.over = 0; r.buf = []; r.progress = 0; r.weakSince = 0; r.restBuf = []; r.restMs = 0; r.flashUntil = 0;
     if (s === "review") { S.current.redo = false; setBuilt(build()); stop(); setCam("off"); }
     setStep(s);
   }
@@ -82,14 +82,6 @@ export default function Calibrate() {
       tracker.current = await createTracker(v, f => { latest.current = f; });
       setCam("on"); enter(goTo);
     } catch (e: any) { stop(); setCam("off"); setErr(e?.name === "NotAllowedError" ? "Camera access is blocked. Allow it in your browser’s site settings (the lock icon by the address), then try again." : `Couldn’t start the camera: ${e?.message ?? e}`); }
-  }
-
-  function bestKey(id: Id, v: Vals): { key: SK; ratio: number } {
-    const nu = S.current.neutral!, g = sig(v);
-    const cands: SK[] = id === "right" ? ["sideA", "sideB"] : id === "left" ? (S.current.rightKey ? [S.current.rightKey === "sideA" ? "sideB" : "sideA"] : ["sideA", "sideB"]) : [id as SK];
-    let best: { key: SK; ratio: number } = { key: cands[0], ratio: -9 };
-    for (const k of cands) { const thr = Math.max(3 * nu.sk[k].std, MINSK[k]), ratio = (g[k] - nu.sk[k].mean) / thr; if (ratio > best.ratio) best = { key: k, ratio }; }
-    return best;
   }
 
   function build(): Built {
@@ -130,38 +122,45 @@ export default function Calibrate() {
       if (ok) { if (!r.alignedSince) r.alignedSince = now; r.lostSince = 0; } else { if (!r.lostSince) r.lostSince = now; if (now - r.lostSince > 400) r.alignedSince = 0; }
       r.locked = !!r.alignedSince && now - r.alignedSince > 700; r.aligned = ok; r.rough = rough; r.face = face;
       hudSkip = false;
+      let count = 0;
       let hint = !face ? "Looking for your face…" : rr < .8 ? "Move a little closer" : rr > 1.25 ? "Move back a little" : dx > CW * .07 ? "Move left" : dx < -CW * .07 ? "Move right" : dy > CH * .07 ? "Move up" : dy < -CH * .07 ? "Move down" : "Hold still";
       const good = !!(fr?.vals && fr.q.face && fr.q.size);
       // ---- state machine ----
-      if (r.step === "align") { r.progress = r.locked ? Math.min(1, (now - r.alignedSince - 700) / 800) : 0; hint = r.locked ? "Locked in" : hint; if (r.locked && now - r.alignedSince > 1500) { buzz(60); enter("rest"); } }
-      else if (r.step === "rest") {
-        hint = rough ? "Relax your face and look at the camera" : hint;
-        if (rough && good && fr!.vals) { r.restBuf.push(fr!.vals); r.restMs += dt; } r.progress = Math.min(1, r.restMs / 3000);
-        if (r.restMs >= 3000 && r.restBuf.length > 25) {
-          const nu: Neutral = { sk: {} as any, raw: {} }; for (const k of SKS) { const a = r.restBuf.map(b => sig(b)[k]); nu.sk[k] = { mean: mean(a), std: sd(a) }; }
-          for (const k of CAL_KEYS) { const a = r.restBuf.map(b => b[k] as number); nu.raw[k as string] = { mean: mean(a), std: sd(a) }; }
-          r.neutral = nu; buzz(100); enter("smile");
-        }
-      } else if ((MOVES as string[]).includes(r.step) && r.neutral) {
-        const id = r.step as Id;
-        if (r.phase === "flash") { hint = "Got it"; r.progress = 1; if (now > r.flashUntil) { const i = ORDER.indexOf(r.step); enter(r.redo ? "review" : ORDER[i + 1]); } }
-        else if (!rough || !good) { r.over = 0; if (r.phase === "hold") { r.phase = "wait"; r.buf = []; } r.progress = 0; if (!face) hint = "Looking for your face…"; }
-        else {
-          const b = bestKey(id, fr!.vals!); const over = b.ratio > 1;
-          if (r.phase === "wait") { hint = COPY[id].cue; r.progress = 0; r.over = over ? r.over + 1 : 0; if (r.over >= 6) { r.phase = "hold"; r.holdStart = now; r.buf = []; r.bestKey = b.key; r.weakSince = 0; } }
-          if (r.phase === "hold") {
-            hint = "Hold it…"; r.buf.push(fr!.vals!); const el = now - r.holdStart; r.progress = Math.min(1, el / 1800);
-            if (b.ratio < .5) { if (!r.weakSince) r.weakSince = now; if (now - r.weakSince > 400) { r.phase = "wait"; r.buf = []; r.over = 0; r.progress = 0; } } else r.weakSince = 0;
-            if (r.phase === "hold" && el >= 1800) {
-              const key = r.bestKey, a = r.buf.map(q => sig(q)[key]), n = r.neutral.sk[key], range = topMean(a) - n.mean;
-              if (range > Math.max(3 * n.std, MINSK[key])) { r.samples[id] = r.buf; if (id === "right") r.rightKey = key; r.phase = "flash"; r.flashUntil = now + 650; buzz(110); }
-              else { r.phase = "wait"; r.buf = []; r.over = 0; hint = "Try a little more"; }
+      if (r.step === "align") { r.progress = r.locked ? Math.min(1, (now - r.alignedSince - 700) / 1300) : 0; hint = r.locked ? "Locked in" : hint; if (r.locked && now - r.alignedSince > 2000) { buzz(60); enter("rest"); } }
+      else if (r.step === "rest" || (MOVES as string[]).includes(r.step)) {
+        const isRest = r.step === "rest", id = r.step as Id, BRIEF = 3500, HOLD = 3000;
+        if (r.phase === "flash") { hint = isRest ? "Baseline saved" : "Got it"; r.progress = 1; if (now > r.flashUntil) { if (isRest) enter("smile"); else enter(r.redo ? "review" : ORDER[ORDER.indexOf(r.step) + 1]); } }
+        else if (!rough || !good) {
+          if (!r.lostAt) r.lostAt = now;
+          if ((r.phase === "count" || r.phase === "hold") && now - r.lostAt > 500) { r.phase = "brief"; r.phaseStart = now; r.buf = []; }
+          if (r.phase === "brief") r.phaseStart = now;
+          r.progress = 0; if (!face) hint = "Looking for your face…";
+        } else {
+          r.lostAt = 0; const el = now - r.phaseStart;
+          if (r.phase === "brief") { hint = r.fails ? "Let’s try that once more" : "Get ready"; r.progress = Math.min(1, el / BRIEF); if (el >= BRIEF || r.skipBrief) { r.skipBrief = false; r.phase = "count"; r.phaseStart = now; } }
+          else if (r.phase === "count") { count = Math.max(1, 3 - Math.floor(el / 1000)); hint = isRest ? "Relax your face" : COPY[id].title; r.progress = 0; if (el >= 3000) { r.phase = "hold"; r.phaseStart = now; r.buf = []; buzz(40); } }
+          else if (r.phase === "hold") {
+            hint = isRest ? "Stay relaxed…" : "Hold it…"; r.buf.push(fr!.vals!); r.progress = Math.min(1, el / HOLD);
+            if (el >= HOLD) {
+              if (isRest) {
+                if (r.buf.length > 25) {
+                  const nu: Neutral = { sk: {} as any, raw: {} }; for (const k of SKS) { const a = r.buf.map(b => sig(b)[k]); nu.sk[k] = { mean: mean(a), std: sd(a) }; }
+                  for (const k of CAL_KEYS) { const a = r.buf.map(b => b[k] as number); nu.raw[k as string] = { mean: mean(a), std: sd(a) }; }
+                  r.neutral = nu; r.phase = "flash"; r.flashUntil = now + 1100; buzz(100);
+                } else { r.fails++; r.phase = "brief"; r.phaseStart = now; }
+              } else if (r.neutral) {
+                const nu = r.neutral, cands: SK[] = id === "right" ? ["sideA", "sideB"] : id === "left" ? (r.rightKey ? [r.rightKey === "sideA" ? "sideB" : "sideA"] : ["sideA", "sideB"]) : [id as SK];
+                let bk = cands[0], br = -9;
+                for (const k of cands) { const a = r.buf.map(q => sig(q)[k]), n = nu.sk[k], ratio = (topMean(a) - n.mean) / Math.max(3 * n.std, MINSK[k]); if (ratio > br) { br = ratio; bk = k; } }
+                if (br > 1) { r.samples[id] = r.buf; if (id === "right") r.rightKey = bk; r.phase = "flash"; r.flashUntil = now + 1200; buzz(110); }
+                else { r.fails++; r.phase = "brief"; r.phaseStart = now; r.buf = []; }
+              } else enter("rest");
             }
           }
         }
-        hudSkip = now - r.enteredAt > 12000 && r.phase === "wait";
+        hudSkip = r.fails >= 2 && !isRest;
       }
-      if (now - hudT > 100) { hudT = now; setHud({ aligned: r.aligned, locked: r.locked, hint, progress: r.progress, phase: r.phase, skipHint: hudSkip, face }); }
+      if (now - hudT > 100) { hudT = now; setHud({ aligned: r.aligned, locked: r.locked, hint, progress: r.progress, phase: r.phase, skipHint: hudSkip, face, count }); }
       drawHud(x, now, face, nx, ny, ok, r.locked, r.step);
     };
     let hudSkip = false;
@@ -193,7 +192,7 @@ export default function Calibrate() {
       <ul className="mt-4 grid gap-2 text-sm text-navy/80">
         <li className="flex gap-3 rounded-xl bg-paper p-3 shadow-soft"><span className="text-teal">01</span>Sit somewhere bright, with light on your face, not behind you.</li>
         <li className="flex gap-3 rounded-xl bg-paper p-3 shadow-soft"><span className="text-teal">02</span>Hold your phone at eye level, about an arm’s length away.</li>
-        <li className="flex gap-3 rounded-xl bg-paper p-3 shadow-soft"><span className="text-teal">03</span>Fit your head inside the outline. When a movement is picked up, it moves on by itself.</li>
+        <li className="flex gap-3 rounded-xl bg-paper p-3 shadow-soft"><span className="text-teal">03</span>Fit your head inside the outline. For each movement we’ll tell you what to do, count 3, 2, 1, and you hold it.</li>
         <li className="flex gap-3 rounded-xl bg-paper p-3 shadow-soft"><span className="text-teal">04</span>Go gently and stop if anything feels strained. You can skip any movement.</li></ul>
       <p className="mt-4 text-xs text-navy/60">Your camera is processed on this device. Video is never uploaded or saved.</p>
       {err && <p role="alert" className="mt-3 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
@@ -229,19 +228,25 @@ export default function Calibrate() {
         </div>
         <div className="pointer-events-none absolute inset-x-0 top-[34%] flex justify-center px-6 text-center">
           {hud.phase === "flash" ? <span className="rounded-full bg-[#8fd0ff] px-5 py-2 text-lg font-semibold text-[#0f1038]">✓ Captured</span>
+            : hud.phase === "count" && hud.count > 0 && (isMove || step === "rest") ? <span className="font-display text-[110px] font-bold leading-none text-white drop-shadow-[0_0_24px_rgba(143,208,255,.9)]" aria-live="assertive">{hud.count}</span>
             : <span className={`rounded-full px-4 py-1.5 font-mono text-xs uppercase tracking-[.18em] backdrop-blur ${hud.aligned ? "bg-[#8fd0ff]/25 text-[#bfe6ff]" : "bg-[#b79cff]/25 text-[#d9ccff]"}`}>{hud.hint}</span>}
         </div>
         <div className="pointer-events-none absolute inset-x-0 bottom-0 p-3">
           <div className="rounded-xl border border-white/10 bg-[#0f1038]/75 p-3 text-white backdrop-blur">
             {step === "align" && <><p className="font-display text-xl">Fit your head in the outline</p><p className="mt-1 text-sm text-white/75">Look straight at the camera. Glasses off, please.</p></>}
-            {step === "rest" && <><p className="font-display text-xl">Relax your face</p><p className="mt-1 text-sm text-white/75">Comfortable and neutral. Hold still for a moment.</p></>}
-            {c && <><p className="font-display text-xl">{c.cue}</p><p className="mt-1 text-sm text-white/75">{hud.skipHint ? "Not picking it up yet. Try a touch more, or skip this one." : c.tip}</p></>}
+            {step === "rest" && (hud.phase === "brief" ? <><p className="font-display text-xl">First, a relaxed face</p><p className="mt-1 text-sm text-white/75">Look at the camera with a comfortable, neutral face. We’ll count down, then you hold it for 3 seconds.</p></>
+              : hud.phase === "count" ? <><p className="font-display text-xl">Relax your face</p><p className="mt-1 text-sm text-white/75">Get comfortable and neutral.</p></>
+              : <><p className="font-display text-xl">Stay relaxed</p><p className="mt-1 text-sm text-white/75">Hold still. Almost done.</p></>)}
+            {c && (hud.phase === "brief" ? <><p className="text-xs uppercase tracking-[.2em] text-[#8fd0ff]">Next up</p><p className="mt-0.5 font-display text-xl">{c.cue}</p><p className="mt-1 text-sm text-white/75">{hud.skipHint ? "Not picking it up yet. Try a little more this time, or skip this one." : `${c.tip} Then we count 3, 2, 1 and you hold it.`}</p></>
+              : hud.phase === "count" ? <><p className="font-display text-xl">{c.cue}</p><p className="mt-1 text-sm text-white/75">Start making the face now, then hold it when the count ends.</p></>
+              : <><p className="font-display text-xl">Hold it…</p><p className="mt-1 text-sm text-white/75">{c.title}. Keep it steady until the bar fills.</p></>)}
             <div className="mt-2.5 h-1 rounded-full bg-white/15"><div className="h-1 rounded-full bg-[#8fd0ff] transition-[width] duration-100" style={{ width: `${Math.round(hud.progress * 100)}%` }} /></div>
           </div></div>
       </div>
       {err && <p role="alert" className="mt-3 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
       <div className="mt-4 flex items-center gap-3">
         <button className="btn-quiet" onClick={() => goBack()}>Back</button>
+        {(isMove || step === "rest") && hud.phase === "brief" && <button className="btn-primary flex-1" onClick={() => { S.current.skipBrief = true; }}>I’m ready</button>}
         {isMove && <button className={`btn-quiet flex-1 ${hud.skipHint ? "!border-teal" : ""}`} onClick={() => enter(S.current.redo ? "review" : ORDER[ORDER.indexOf(step) + 1])}>Skip this one</button>}
       </div>
     </main>);
