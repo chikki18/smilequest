@@ -85,40 +85,45 @@ function drawCritter(c: CanvasRenderingContext2D, x: number, y: number, ang: num
 function cloud(c: CanvasRenderingContext2D, x: number, y: number, r: number) {
   c.beginPath(); c.arc(x, y, r, 0, TAU); c.arc(x + r * .9, y + r * .15, r * .8, 0, TAU); c.arc(x - r * .9, y + r * .2, r * .7, 0, TAU); c.arc(x + r * .1, y - r * .45, r * .75, 0, TAU); c.fill();
 }
+const PALS = {
+  night: { sky0: "#0d0f36", sky1: "#3b2a8c", cloud: "rgba(183,156,255,.28)", hill: "#232a78", hill2: "#1b2160", pipe: "#7c5ce0", pipeCap: "#9a7cf0", pipeStroke: "#1d1550", coin: "#7cc8ff", coinStroke: "#1d4d8a", ground: "#262b78", ground2: "#2e3490", grass: "#8fd0ff", grassLine: "#3a7bbf", on: "#8fd0ff", off: "#6a6fb8" },
+  morning: { sky0: "#a6a3d0", sky1: "#e6e4f7", cloud: "rgba(255,255,255,.85)", hill: "#9a97cf", hill2: "#7c78b5", pipe: "#6a4fc4", pipeCap: "#8a6fe0", pipeStroke: "#2b1f6b", coin: "#7cc8ff", coinStroke: "#1d4d8a", ground: "#cfd0ea", ground2: "#bdbde0", grass: "#8ec5f0", grassLine: "#53509a", on: "#53509a", off: "#a6a3d0" },
+};
+const pal = () => (typeof document !== "undefined" && document.documentElement.dataset.theme === "morning" ? PALS.morning : PALS.night);
 function pillar(c: CanvasRenderingContext2D, px: number, yA: number, yB: number, capAtB: boolean) {
-  const w = 52, cw = 64, ch = 24;
-  c.fillStyle = "#79c08c"; c.strokeStyle = "#35604a"; c.lineWidth = 3;
+  const w = 52, cw = 64, ch = 24, T = pal();
+  c.fillStyle = T.pipe; c.strokeStyle = T.pipeStroke; c.lineWidth = 3;
   c.fillRect(px - w / 2, yA, w, yB - yA); c.strokeRect(px - w / 2, yA, w, yB - yA);
   c.fillStyle = "rgba(255,255,255,.28)"; c.fillRect(px - w / 2 + 6, yA, 8, yB - yA);
   const cy = capAtB ? yB - ch : yA;
-  c.fillStyle = "#8fd09f"; c.fillRect(px - cw / 2, cy, cw, ch); c.strokeRect(px - cw / 2, cy, cw, ch);
+  c.fillStyle = T.pipeCap; c.fillRect(px - cw / 2, cy, cw, ch); c.strokeRect(px - cw / 2, cy, cw, ch);
   c.fillStyle = "rgba(255,255,255,.3)"; c.fillRect(px - cw / 2 + 6, cy + 3, 8, ch - 6);
 }
 function outlined(c: CanvasRenderingContext2D, text: string, x: number, y: number, size: number, lw: number) {
   c.font = `bold ${size}px system-ui, sans-serif`; c.lineWidth = lw; c.strokeStyle = "#2b3340"; c.strokeText(text, x, y); c.fillStyle = "#fff"; c.fillText(text, x, y);
 }
 function drawWorld(c: CanvasRenderingContext2D, s: G, now: number, body: string, acc: string, kind: string) {
-  const H = s.wh, GROUND = H - GROUND_H, sc = s.scroll;
-  const g = c.createLinearGradient(0, 0, 0, GROUND); g.addColorStop(0, "#62c3ee"); g.addColorStop(1, "#cdeef6");
+  const H = s.wh, GROUND = H - GROUND_H, sc = s.scroll, T = pal();
+  const g = c.createLinearGradient(0, 0, 0, GROUND); g.addColorStop(0, T.sky0); g.addColorStop(1, T.sky1);
   c.fillStyle = g; c.fillRect(0, 0, W, H);
-  c.fillStyle = "rgba(255,255,255,.92)";
+  c.fillStyle = T.cloud;
   for (let i = 0; i < 5; i++) { const cx = (((i * 170 - (sc + now * .01) * .15) % (W + 200)) + (W + 200)) % (W + 200) - 100; cloud(c, cx, 190 + ((i * 53) % 150), 24 + (i % 3) * 7); }
-  c.fillStyle = "#a9ddd2";
+  c.fillStyle = T.hill;
   for (let i = 0; i < 8; i++) { const bx = (((i * 110 - sc * .3) % 880) + 880) % 880 - 110; c.beginPath(); c.ellipse(bx, GROUND, 70, 70 + (i % 3) * 20, 0, Math.PI, TAU); c.fill(); }
-  c.fillStyle = "#86d38c";
+  c.fillStyle = T.hill2;
   for (let i = 0; i < 8; i++) { const bx = (((i * 90 - sc * .6) % 720) + 720) % 720 - 90; c.beginPath(); c.ellipse(bx, GROUND, 44, 26 + (i % 2) * 8, 0, Math.PI, TAU); c.fill(); }
   for (const p of s.pillars) { const px = p.x - sc; if (px < -60 || px > W + 60) continue; pillar(c, px, -4, p.c - p.gap / 2, true); pillar(c, px, p.c + p.gap / 2, GROUND, false); }
   s.coins.forEach((co, i) => {
     if (co.got) return; const sx = co.x - sc; if (sx < -20 || sx > W + 20) return;
     const wd = Math.abs(Math.cos(now / 220 + i)) * 8 + 2;
-    c.fillStyle = "#f6c945"; c.strokeStyle = "#a67c12"; c.lineWidth = 2; c.beginPath(); c.ellipse(sx, co.y, wd, 10, 0, 0, TAU); c.fill(); c.stroke();
+    c.fillStyle = T.coin; c.strokeStyle = T.coinStroke; c.lineWidth = 2; c.beginPath(); c.ellipse(sx, co.y, wd, 10, 0, 0, TAU); c.fill(); c.stroke();
     c.fillStyle = "rgba(255,255,255,.55)"; c.beginPath(); c.ellipse(sx - wd * .25, co.y - 3, wd * .3, 4, 0, 0, TAU); c.fill();
   });
-  c.fillStyle = "#e3d49b"; c.fillRect(0, GROUND, W, H - GROUND);
-  c.fillStyle = "#d2c186"; const off = sc % 24;
+  c.fillStyle = T.ground; c.fillRect(0, GROUND, W, H - GROUND);
+  c.fillStyle = T.ground2; const off = sc % 24;
   for (let x = -24 - off; x < W + 24; x += 24) { c.beginPath(); c.moveTo(x, GROUND + 14); c.lineTo(x + 12, GROUND + 14); c.lineTo(x, H); c.lineTo(x - 12, H); c.closePath(); c.fill(); }
-  c.fillStyle = "#8ad06a"; c.fillRect(0, GROUND, W, 14);
-  c.strokeStyle = "#4f7a3a"; c.lineWidth = 3; c.beginPath(); c.moveTo(0, GROUND); c.lineTo(W, GROUND); c.moveTo(0, GROUND + 14); c.lineTo(W, GROUND + 14); c.stroke();
+  c.fillStyle = T.grass; c.fillRect(0, GROUND, W, 14);
+  c.strokeStyle = T.grassLine; c.lineWidth = 3; c.beginPath(); c.moveTo(0, GROUND); c.lineTo(W, GROUND); c.moveTo(0, GROUND + 14); c.lineTo(W, GROUND + 14); c.stroke();
   if (!(s.invuln > 0 && Math.floor(now / 120) % 2)) drawCritter(c, BX, s.y, clamp(s.vy / 400, -.5, .7), kind, body, acc, s.flap);
   c.textAlign = "center"; c.lineJoin = "round";
   outlined(c, String(s.points), W / 2, TOP + 64, 54, 7);
@@ -126,7 +131,7 @@ function drawWorld(c: CanvasRenderingContext2D, s: G, now: number, body: string,
   // movement meter on the ground strip
   const mx = 60, mw = 240, my = GROUND + 44;
   rr(c, mx, my, mw, 18, 9); c.fillStyle = "rgba(43,51,64,.45)"; c.fill();
-  if (s.lev > 0.01) { rr(c, mx, my, Math.max(18, mw * s.lev), 18, 9); c.fillStyle = s.active ? "#4E8A86" : "#a9b8a0"; c.fill(); }
+  if (s.lev > 0.01) { rr(c, mx, my, Math.max(18, mw * s.lev), 18, 9); c.fillStyle = s.active ? T.on : T.off; c.fill(); }
   c.fillStyle = "#fff"; c.fillRect(mx + mw * HOVER - 1.5, my - 5, 3, 28);
   outlined(c, s.active ? "Holding it. Nice." : "Hold past the white line", W / 2, my + 46, 14, 4);
 }
@@ -175,19 +180,19 @@ function AccChart({ games }: { games: GameRow[] }) {
   const sel = h != null ? rows[h] : null;
   return (
     <div>
-      <svg viewBox="0 0 340 150" className="w-full" role="img" aria-label={`Accuracy for your last ${rows.length} games`}>
-        {[0, 50, 100].map(v => <g key={v}><line x1={x0} x2={336} y1={base - ph * v / 100} y2={base - ph * v / 100} stroke="#E8E2D4" strokeWidth="1" /><text x={x0 - 6} y={base - ph * v / 100 + 4} textAnchor="end" fontSize="10" fill="#1B2A3A" opacity=".6">{v}%</text></g>)}
+      <svg viewBox="0 0 340 150" className="w-full text-navy" role="img" aria-label={`Accuracy for your last ${rows.length} games`}>
+        {[0, 50, 100].map(v => <g key={v}><line x1={x0} x2={336} y1={base - ph * v / 100} y2={base - ph * v / 100} stroke="currentColor" strokeOpacity=".15" strokeWidth="1" /><text x={x0 - 6} y={base - ph * v / 100 + 4} textAnchor="end" fontSize="10" fill="currentColor" opacity=".6">{v}%</text></g>)}
         {rows.map((r, i) => {
           const acc = Number(r.accuracy ?? 0), bh = Math.max(2, ph * acc / 100), x = x0 + i * slot + (slot - bw) / 2, y = base - bh, rad = Math.min(4, bh / 2);
           return (
             <g key={r.id} tabIndex={0} role="img" aria-label={`${fmtDate(r.played_at)}: ${Math.round(acc)} percent accuracy, ${r.points} points`}
               onMouseEnter={() => setH(i)} onFocus={() => setH(i)} onClick={() => setH(i)} style={{ cursor: "pointer", outline: "none" }}>
               <rect x={x - 3} y={top - 6} width={bw + 6} height={ph + 26} fill="transparent" />
-              <path d={`M${x},${base} V${y + rad} Q${x},${y} ${x + rad},${y} H${x + bw - rad} Q${x + bw},${y} ${x + bw},${y + rad} V${base} Z`} fill={h === i ? "#1B2A3A" : "#4E8A86"} />
-              {i === rows.length - 1 && <text x={x + bw / 2} y={y - 5} textAnchor="middle" fontSize="11" fontWeight="600" fill="#1B2A3A">{Math.round(acc)}%</text>}
+              <path d={`M${x},${base} V${y + rad} Q${x},${y} ${x + rad},${y} H${x + bw - rad} Q${x + bw},${y} ${x + bw},${y + rad} V${base} Z`} fill={h === i ? "currentColor" : "rgb(var(--teal))"} />
+              {i === rows.length - 1 && <text x={x + bw / 2} y={y - 5} textAnchor="middle" fontSize="11" fontWeight="600" fill="currentColor">{Math.round(acc)}%</text>}
             </g>);
         })}
-        {rows.length > 0 && <><text x={x0 + (slot) / 2} y="140" fontSize="10" fill="#1B2A3A" opacity=".6" textAnchor="start">{fmtDate(rows[0].played_at)}</text><text x="336" y="140" fontSize="10" fill="#1B2A3A" opacity=".6" textAnchor="end">{fmtDate(rows[rows.length - 1].played_at)}</text></>}
+        {rows.length > 0 && <><text x={x0 + (slot) / 2} y="140" fontSize="10" fill="currentColor" opacity=".6" textAnchor="start">{fmtDate(rows[0].played_at)}</text><text x="336" y="140" fontSize="10" fill="currentColor" opacity=".6" textAnchor="end">{fmtDate(rows[rows.length - 1].played_at)}</text></>}
       </svg>
       <p className="min-h-[20px] text-xs text-navy/70" aria-live="polite">{sel ? `${fmtDate(sel.played_at)} · ${Math.round(Number(sel.accuracy ?? 0))}% accuracy · ${sel.points} points · ${sel.coins} coins` : "Tap a bar for details."}</p>
     </div>);
@@ -235,9 +240,8 @@ export default function Flight() {
 
   function stop() { tracker.current?.stop(); tracker.current = null; stream.current?.getTracks().forEach(t => t.stop()); stream.current = null; latest.current = null; }
   // ---- in-game calibration ----
-  function openCalibrate(from: "play" | "settings") {
-    setCalFrom(from); setCalStep(0); setCalNeutral(null); setCalMoves({}); setCalMsg(null); setCalStatus(null); setCalCam(tracker.current ? "on" : "off"); setMsg(null); setView("calibrate");
-  }
+  function openCalibrate(_from: "play" | "settings") { location.href = "/calibrate?next=" + encodeURIComponent("/flyer?ready=1"); }
+
   function closeCalibrate(saved: boolean) {
     stop(); setCalCam("off"); setCalStatus(null); setCalBusy(false);
     if (saved && calFrom === "play") setView("ready"); else setView(calFrom === "play" ? "hub" : "settings");
@@ -419,7 +423,7 @@ export default function Flight() {
   useEffect(() => {
     if (view !== "custom") return; const cv = pvRef.current; if (!cv) return;
     const c = cv.getContext("2d")!; cv.width = 240; cv.height = 150;
-    const gr = c.createLinearGradient(0, 0, 0, 150); gr.addColorStop(0, "#62c3ee"); gr.addColorStop(1, "#cdeef6"); c.fillStyle = gr; c.fillRect(0, 0, 240, 150);
+    const T = pal(), gr = c.createLinearGradient(0, 0, 0, 150); gr.addColorStop(0, T.sky0); gr.addColorStop(1, T.sky1); c.fillStyle = gr; c.fillRect(0, 0, 240, 150);
     const an = ANIMALS.find(a => a.k === prof.kind) ?? ANIMALS[0];
     drawCritter(c, 120, 82, -.1, prof.kind, prof.color || an.col, prof.acc, 0.6, 2.4);
   }, [view, prof]);
@@ -511,23 +515,20 @@ export default function Flight() {
     if (view === "settings") {
       return (
         <Page><h1 className="font-display text-3xl">Settings</h1>
-          <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">1. Calibrate</h2>
-            <p className="mt-1 text-sm text-navy/70">{hasCal ? `Ready: ${KEYS.filter(k => cal[k]).map(k => EXPR[k].name).join(", ")}.` : "Not set up yet. Calibrating teaches the game your own comfortable movements."}</p>
-            <button className="btn-primary mt-3 w-full" onClick={() => openCalibrate("settings")}>{hasCal ? "Recalibrate" : "Calibrate"}</button></section>
-          <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">2. Game length</h2>
+          <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">1. Game length</h2>
             <div className="mt-3 grid grid-cols-4 gap-2" role="radiogroup" aria-label="Game length">{LENS.map(v => <button key={v} role="radio" aria-checked={st.len === v} onClick={() => update({ len: v })} className={`min-h-[56px] rounded-2xl border ${st.len === v ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`}>{v}s</button>)}</div>
             <p className="mt-2 text-xs text-navy/60">Play time only. The short get-ready breaks between expressions are extra.</p></section>
-          <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">3. Expressions</h2>
+          <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">2. Expressions</h2>
             <div className="mt-3 flex flex-wrap gap-2">{([["All four", [...KEYS]], ["Smile only", ["smile"]], ["Eyebrows only", ["brow"]], ["Smile + eyebrows", ["smile", "brow"]]] as [string, string[]][]).map(([lab, ks]) => { const ok = ks.every(k => cal[k as K]); const on = st.exprs.length === ks.length && ks.every(k => st.exprs.includes(k as K)); return <button key={lab} disabled={!ok} aria-pressed={on} onClick={() => update({ exprs: ks as K[] })} className={`min-h-[48px] rounded-2xl border px-4 text-sm disabled:opacity-40 ${on ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`}>{lab}</button>; })}</div>
             <div className="mt-3 grid gap-2">{KEYS.map(k => (
               <button key={k} role="checkbox" aria-checked={st.exprs.includes(k)} disabled={!cal[k]} onClick={() => { const has = st.exprs.includes(k); const nx = has ? st.exprs.filter(x => x !== k) : KEYS.filter(x => st.exprs.includes(x) || x === k); if (nx.length) update({ exprs: nx as K[] }); }}
                 className={`flex min-h-[64px] items-center gap-3 rounded-2xl border px-3 text-left ${st.exprs.includes(k) ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"} disabled:opacity-40`}><FaceArt k={k} size={44} /><span>{EXPR[k].name}{!cal[k] && <span className="block text-xs text-navy/60">Not calibrated</span>}</span></button>))}</div>
             <p className="mt-2 text-xs text-navy/60">{PER(Math.max(1, st.exprs.filter(k => cal[k]).length), st.len)}.</p></section>
-          <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">4. Game speed</h2>
+          <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">3. Game speed</h2>
             <div className="mt-3 grid gap-2" role="radiogroup" aria-label="Game speed">{PACES.map(x => <button key={x.v} role="radio" aria-checked={st.pace === x.v} onClick={() => update({ pace: x.v })} className={`min-h-[52px] rounded-2xl border px-4 text-left ${st.pace === x.v ? "border-teal bg-teal/10 shadow-soft" : "border-navy/15 bg-paper"}`}>{x.n}</button>)}</div></section>
-          <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>5. Vibration</b><br /><span className="text-sm text-navy/60">Buzz after each calibration step, when each expression starts, and when your eyes close or open. Works on phones that allow it.</span></span>
+          <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>4. Vibration</b><br /><span className="text-sm text-navy/60">Buzz after each calibration step, when each expression starts, and when your eyes close or open. Works on phones that allow it.</span></span>
             <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.haptics} onChange={e => update({ haptics: e.target.checked })} aria-label="Vibration" /></label>
-          <h2 className="mt-6 font-display text-xl">6. Advanced</h2>
+          <h2 className="mt-6 font-display text-xl">5. Advanced</h2>
           <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>Automatic sensitivity and gap size</b><br /><span className="text-sm text-navy/60">Recommended. Turn off to adjust them yourself.</span></span>
             <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.auto} onChange={e => update({ auto: e.target.checked })} aria-label="Automatic sensitivity and gap size" /></label>
           {!st.auto && <div className="mt-4 grid gap-4">
@@ -592,7 +593,7 @@ export default function Flight() {
     }
 
     if (view === "play") return (
-      <div className="fixed inset-0 touch-none bg-[#62c3ee]" style={{ height: "100dvh" }}>
+      <div className="fixed inset-0 touch-none bg-ivory" style={{ height: "100dvh" }}>
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" style={{ width: box.w, height: box.h }}>
           <canvas ref={cvRef} style={{ width: "100%", height: "100%" }} aria-label="Side-scrolling flight. Hold the requested movement and the bird flies the path." />
         </div>
@@ -605,7 +606,7 @@ export default function Flight() {
               <div className="grid h-16 w-16 shrink-0 place-items-center rounded-full border-4 border-teal text-3xl font-bold" aria-label={`${ui.left} seconds left`}>{ui.left}</div>
             </div></div></div>
         <button aria-label="Pause" onClick={() => { g.current.manual = true; }} className="absolute z-20 grid h-14 w-14 place-items-center rounded-full bg-paper/90 shadow-soft" style={{ left: 12, top: `calc(env(safe-area-inset-top, 0px) + ${BANNER_H + 10}px)` }}>
-          <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden><rect x="4" y="3" width="5" height="16" rx="1.5" fill="#1B2A3A" /><rect x="13" y="3" width="5" height="16" rx="1.5" fill="#1B2A3A" /></svg></button>
+          <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden><rect x="4" y="3" width="5" height="16" rx="1.5" fill="currentColor" /><rect x="13" y="3" width="5" height="16" rx="1.5" fill="currentColor" /></svg></button>
         {ui.stage === "ready" && !ui.paused && !ui.adjust && <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-navy/85 px-6 text-center text-ivory" role="status">
           <p className="text-sm text-ivory/70">Expression {ui.si + 1} of {ui.total}</p>
           <div className="mt-3"><FaceArt k={ui.k} size={200} /></div>
@@ -629,7 +630,7 @@ export default function Flight() {
     return (
       <Page>
         <div className="flex items-center justify-between"><a href="/dashboard" className="text-sm text-navy/60">← Home</a><span className="rounded-full bg-paper px-4 py-2 text-sm shadow-soft">🪙 <b>{prof.total}</b></span></div>
-        <svg viewBox="0 0 240 130" className="mt-4 w-full rounded-3xl shadow-soft" aria-hidden><rect width="240" height="130" fill="#62c3ee" /><rect x="170" y="0" width="30" height="44" fill="#79c08c" stroke="#35604a" strokeWidth="3" /><rect x="170" y="88" width="30" height="42" fill="#79c08c" stroke="#35604a" strokeWidth="3" />
+        <svg viewBox="0 0 240 130" className="mt-4 w-full rounded-3xl shadow-soft" aria-hidden><rect width="240" height="130" fill="rgb(var(--lav))" /><rect x="170" y="0" width="30" height="44" fill="rgb(var(--teal))" stroke="rgb(var(--navy))" strokeWidth="3" /><rect x="170" y="88" width="30" height="42" fill="rgb(var(--teal))" stroke="rgb(var(--navy))" strokeWidth="3" />
           <ellipse cx="80" cy="66" rx="26" ry="23" fill="#6bb3a8" stroke="#2b3340" strokeWidth="3" /><circle cx="90" cy="59" r="6" fill="#fff" stroke="#2b3340" strokeWidth="2" /><circle cx="92" cy="59" r="3" fill="#2b3340" /><path d="M104 66 L120 71 L104 76Z" fill="#f29e4c" stroke="#2b3340" strokeWidth="2" />
           <circle cx="185" cy="66" r="9" fill="#f6c945" stroke="#a67c12" strokeWidth="2" /></svg>
         <h1 className="mt-5 font-display text-4xl">Mirror Flight</h1>
