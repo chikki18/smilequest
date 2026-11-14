@@ -61,7 +61,7 @@ export async function createTracker(video: HTMLVideoElement, onFrame: (f: Frame)
     let closeL = bs.eyeBlinkLeft ?? 0, closeR = bs.eyeBlinkRight ?? 0;
     if (swap) [closeL, closeR] = [closeR, closeL];
     const raw: Vals = { liftL, liftR, browL, browR, closeL, closeR, smile: (liftL + liftR) / 2, brow: (browL + browR) / 2, close: (closeL + closeR) / 2, pucker: bs.mouthPucker ?? 0,
-      frown: ((bs.mouthFrownLeft ?? 0) + (bs.mouthFrownRight ?? 0)) / 2, sideA: bs.mouthLeft ?? 0, sideB: bs.mouthRight ?? 0 };
+      frown: Math.max(0, ((bs.mouthFrownLeft ?? 0) + (bs.mouthFrownRight ?? 0)) / 2 - 0.5 * ((bs.browDownLeft ?? 0) + (bs.browDownRight ?? 0)) / 2), sideA: bs.mouthLeft ?? 0, sideB: bs.mouthRight ?? 0 };
     const size = iod / W > 0.1 && iod / W < 0.45 && P[1].x > 0.1 && P[1].x < 0.9 && P[1].y > 0.1 && P[1].y < 0.9;
     if (!sm) sm = raw; else for (const k of Object.keys(raw) as (keyof Vals)[]) sm[k] = sm[k] * 0.65 + raw[k] * 0.35; // temporal smoothing
     emit({ ...sm }, true, size, { x: P[1].x, y: P[1].y, s: iod / W });
