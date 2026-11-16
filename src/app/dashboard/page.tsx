@@ -79,14 +79,21 @@ function TestHome() {
           <circle cx="271" cy="65" r="6" fill="rgb(var(--gold))" /></svg>
         <div className="flex items-center justify-between p-5"><div><h3 className="font-display text-2xl">Mirror Flight</h3><p className="mt-1 text-sm text-navy/70">Gentle and steady. Fly through the gaps.</p></div><span className="text-2xl text-teal" aria-hidden>→</span></div></a>
       <a href="/dash" className="mt-4 block overflow-hidden rounded-3xl border border-navy/10 bg-paper shadow-soft transition active:scale-[.99]">
-        <svg viewBox="0 0 320 130" className="block w-full" aria-hidden><defs><linearGradient id="dg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="rgb(var(--navy))" stopOpacity=".92" /><stop offset="1" stopColor="rgb(var(--teal))" /></linearGradient></defs><rect width="320" height="130" fill="url(#dg)" />
-          <path d="M148 34h24l70 96H78z" fill="rgb(var(--paper))" opacity=".12" />
-          <path d="M155 34L128 130M160 34v96M165 34l27 96" stroke="rgb(var(--paper))" strokeOpacity=".35" strokeWidth="1.5" />
-          <rect x="143" y="62" width="34" height="5" rx="2.5" fill="rgb(var(--gold))" />
-          <circle cx="186" cy="82" r="4.5" fill="rgb(var(--gold))" /><circle cx="196" cy="100" r="6" fill="rgb(var(--gold))" />
-          <rect x="106" y="86" width="26" height="30" rx="13" fill="rgb(var(--paper))" /><circle cx="119" cy="80" r="8" fill="rgb(var(--paper))" /></svg>
+        <svg viewBox="0 0 320 130" className="block w-full" aria-hidden><defs><linearGradient id="dg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#14143f" /><stop offset=".55" stopColor="#3a2f86" /><stop offset="1" stopColor="#6b4fb8" /></linearGradient><linearGradient id="dp" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#8f86d6" stopOpacity=".55" /><stop offset="1" stopColor="#c9c2f2" stopOpacity=".9" /></linearGradient></defs><rect width="320" height="130" fill="url(#dg)" />
+          <circle cx="252" cy="26" r="13" fill="#e9e6ff" opacity=".9" />
+          <path d="M0 62l30-14 24 10 28-16 26 14 24-8 28 12 26-6 24 8 26-12 24 14 30-8v34H0z" fill="#241f66" />
+          <path d="M138 44h44v6h-44zM144 50h32v16h-32zM150 38h20v6h-20z" fill="#1a1650" /><rect x="154" y="54" width="12" height="12" fill="#6b4fb8" opacity=".7" />
+          <path d="M146 64h28l76 66H70z" fill="url(#dp)" />
+          <path d="M160 64L116 130M160 64v66M160 64l44 66" stroke="#fff" strokeOpacity=".35" strokeWidth="1.4" />
+          <rect x="196" y="92" width="26" height="6" rx="3" fill="#4a3f9c" /><rect x="198" y="98" width="22" height="9" rx="2" fill="#2a2370" />
+          <circle cx="126" cy="86" r="4.5" fill="#f6c453" /><circle cx="122" cy="100" r="5.5" fill="#f6c453" /><circle cx="116" cy="116" r="6.5" fill="#f6c453" />
+          <path d="M146 106q-22-4-28 10q14 2 26-6z" fill="#e8772e" /><circle cx="118" cy="114" r="4" fill="#fff" />
+          <ellipse cx="160" cy="104" rx="11" ry="15" fill="#e8772e" /><ellipse cx="160" cy="108" rx="6" ry="9" fill="#f7e0c4" />
+          <path d="M150 90l-2-13 9 7zM170 90l2-13-9 7z" fill="#e8772e" /><circle cx="160" cy="88" r="10" fill="#f08a3c" /><path d="M153 91q7 9 14 0q-7 3-14 0z" fill="#fff" /><circle cx="156" cy="86" r="1.6" fill="#1a1650" /><circle cx="164" cy="86" r="1.6" fill="#1a1650" /><circle cx="160" cy="91" r="1.7" fill="#1a1650" />
+          <path d="M152 118l-5 8M168 118l5 8" stroke="#c4561c" strokeWidth="4" strokeLinecap="round" /></svg>
         <div className="flex items-center justify-between p-5"><div><h3 className="font-display text-2xl">Mirror Dash</h3><p className="mt-1 text-sm text-navy/70">Fast and challenging. Run, jump, duck and fly.</p></div><span className="text-2xl text-teal" aria-hidden>→</span></div></a>
       <a href="/calibrate" className="btn-quiet mt-8 inline-flex min-h-[52px] w-full items-center justify-center">{any ? "Recalibrate" : "Calibrate"}</a>
+      <button className="mt-10 block w-full text-center text-sm text-navy/60 underline" onClick={logout}>Log out</button>
     </main>);
 }
 
