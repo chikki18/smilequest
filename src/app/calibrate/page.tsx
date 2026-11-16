@@ -12,7 +12,7 @@ const MOVES: Id[] = ["smile", "brow", "frown", "pucker", "right", "left", "close
 const COPY: Record<Id, { title: string; cue: string; tip: string; games: string }> = {
   smile: { title: "Smile", cue: "Give a gentle smile", tip: "Like greeting a friend. Never force it.", games: "Flight · Dash" },
   brow: { title: "Eyebrow raise", cue: "Lift your eyebrows", tip: "Raise them gently, as if mildly surprised.", games: "Flight · Dash" },
-  frown: { title: "Frown", cue: "Turn the corners of your mouth down", tip: "Just your mouth, like a small frown. Keep your brows relaxed.", games: "Dash" },
+  frown: { title: "Frown", cue: "Frown", tip: "Turn the corners of your mouth down. Keep your brows relaxed.", games: "Dash" },
   pucker: { title: "Lip pucker", cue: "Round your lips like “ooo”", tip: "Gently purse them and hold.", games: "Flight" },
   right: { title: "Pucker to your right", cue: "Pucker, then nudge your lips to your right", tip: "Round your lips, then shift them toward your right cheek.", games: "Dash" },
   left: { title: "Pucker to your left", cue: "Pucker, then nudge your lips to your left", tip: "Round your lips, then shift them toward your left cheek.", games: "Dash" },
@@ -214,8 +214,8 @@ export default function Calibrate() {
         <ul className="mt-4 grid gap-2">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded-xl bg-paper p-3 shadow-soft"><Guide id={m} size={44} /><span className="flex-1"><b>{COPY[m].title}</b><br /><span className="text-xs text-navy/60">{COPY[m].games}</span></span>
           <span className={`rounded-full px-3 py-1 text-xs ${st(m) === "ok" ? "bg-sage/40" : "bg-gold/30"}`}>{st(m) === "ok" ? "Ready" : st(m) === "weak" ? "Not detected" : "Skipped"}</span>
           <button className="text-sm text-teal underline" onClick={() => { S.current.redo = true; startCam(m); }}>Redo</button></li>)}</ul>
-        <div className="mt-4 grid gap-2 text-sm"><p className={`rounded-xl p-3 ${flightOk ? "bg-sage/25" : "bg-gold/25"}`}>Mirror Flight: {flightOk ? "ready with the movements marked Ready." : "record at least one movement."}</p>
-          <p className={`rounded-xl p-3 ${dashOk ? "bg-sage/25" : "bg-gold/25"}`}>Mirror Dash: {dashOk ? "ready." : "needs smile, eyebrows, frown, and pucker right and left to all be Ready."}</p></div>
+        <div className="mt-4 grid gap-2 text-sm"><p className={`rounded-xl p-3 ${flightOk ? "bg-sage/25" : "bg-gold/25"}`}>Mirror Flight: {flightOk ? "ready" : "needs at least one movement"}</p>
+          <p className={`rounded-xl p-3 ${dashOk ? "bg-sage/25" : "bg-gold/25"}`}>Mirror Dash: {dashOk ? "ready" : "not ready yet"}</p></div>
         {err && <p role="alert" className="mt-3 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
         <div className="mt-auto pt-6"><button className="btn-primary w-full min-h-[60px] text-lg" disabled={saving || saved || !(flightOk || dashOk)} onClick={save}>{saved ? "Saved ✓" : saving ? "Saving…" : "Save calibration"}</button>
           <button className="btn-quiet mt-3 w-full" disabled={saving} onClick={() => goBack()}>Back</button></div>
