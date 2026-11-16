@@ -132,7 +132,7 @@ function drawWorld(c: CanvasRenderingContext2D, s: G, now: number, body: string,
   const mx = 60, mw = 240, my = GROUND + 44;
   rr(c, mx, my, mw, 18, 9); c.fillStyle = "rgba(43,51,64,.45)"; c.fill();
   if (s.lev > 0.01) { rr(c, mx, my, Math.max(18, mw * s.lev), 18, 9); c.fillStyle = s.active ? T.on : T.off; c.fill(); }
-  c.fillStyle = "#fff"; c.fillRect(mx + mw * HOVER - 1.5, my - 5, 3, 28);
+  c.fillStyle = "#fff"; c.fillRect(mx + mw * (s.plan[s.si] === "smile" ? .55 : HOVER) - 1.5, my - 5, 3, 28);
   outlined(c, s.active ? "Holding it. Nice." : "Hold past the white line", W / 2, my + 46, 14, 4);
 }
 
@@ -382,8 +382,8 @@ export default function Flight() {
       if (!(fr && fr.vals && fr.q.face && fr.q.size)) { if (s.lostSince == null) s.lostSince = now; if (now - s.lostSince > 600 && !s.adjust) { s.adjust = true; s.pauses++; } return; }
       s.lostSince = null; s.adjust = false;
       const k = s.plan[s.si], m = calRef.current[k]; if (!m) return;
-      let l = clamp(liveGain.current * (fr.vals[k] - m.nm) / m.range, 0, 1); if (l < .12) l = 0;
-      s.lev += (l - s.lev) * .3; s.flap += dt * (8 + s.lev * 12); s.active = s.lev >= HOVER;
+      let l = clamp(liveGain.current * (k === "smile" ? .72 : 1) * (fr.vals[k] - m.nm) / m.range, 0, 1); if (l < .12) l = 0;
+      s.lev += (l - s.lev) * .55; s.flap += dt * (8 + s.lev * 12); s.active = s.active ? s.lev >= (k === "smile" ? .4 : .28) : s.lev >= (k === "smile" ? .55 : HOVER);
       if (s.stage === "play" && k === "close" && s.active !== hap.current.act) { hap.current.act = s.active; if (hapOn.current) buzz(s.active ? 40 : [30, 50, 30]); }
       const ground = s.wh - GROUND_H;
       if (s.stage === "ready") { s.readyLeft -= dt; s.y = s.mid + Math.sin(now / 400) * 6; s.vy = 0; if (s.readyLeft <= 0) { s.stage = "play"; s.stageT = 0; hap.current.act = false; if (hapOn.current) buzz(150); } return; }
@@ -581,9 +581,12 @@ export default function Flight() {
           <p className="mt-2 text-navy/70">Thanks for flying. Every flight counts.</p>
           <div className="mt-5 grid grid-cols-2 gap-3">{([["Points", String(R.points)], ["Accuracy", `${Math.round(R.accuracy)}%`], ["Coins", String(R.coins)], ["Missed gates", String(R.misses)]] as [string, string][]).map(([k, v]) => <div key={k} className="rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-4xl">{v}</div><div className="text-xs text-navy/60">{k}</div></div>)}
             <div className="col-span-2 rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-4xl">{R.bestStreak}</div><div className="text-xs text-navy/60">Best streak (gates in a row)</div></div></div>
-          <p className="mt-2 text-xs text-navy/60">Accuracy is the share of play time you held the requested movement. A missed gate is a bump into a pillar. You’re guided back, and nothing is lost.</p>
-          <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">By expression</h2>
-            <ul className="mt-3 grid gap-3">{R.per.map(p => <li key={p.k} className="flex items-center gap-3"><FaceArt k={p.k} size={40} /><span className="flex-1 text-sm">{EXPR[p.k].name}<br /><span className="text-xs text-navy/60">{p.gates} gates · {p.coins} coins · {p.misses} missed</span></span><b>{Math.round(p.accuracy)}%</b></li>)}</ul></section>
+          <p className="mt-2 text-xs text-navy/60">A missed gate is a bump into a pillar. You’re guided back, and nothing is lost.</p>
+          <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">Accuracy by movement</h2>
+            <ul className="mt-4 grid gap-4">{R.per.map(p => { const pct = Math.round(p.accuracy); return <li key={p.k} className="flex items-center gap-3"><FaceArt k={p.k} size={40} /><div className="min-w-0 flex-1"><div className="flex items-baseline justify-between gap-2 text-sm"><span>{EXPR[p.k].name}</span><b>{pct}%</b></div>
+              <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-mist" role="img" aria-label={`${EXPR[p.k].name}: ${pct} percent`}><div className="h-full rounded-full bg-teal" style={{ width: `${pct}%` }} /></div>
+              <div className="mt-1 text-xs text-navy/60">{p.gates} gates · {p.coins} coins · {p.misses} missed</div></div></li>; })}</ul>
+            <p className="mt-4 text-xs text-navy/60">Accuracy is the share of time you held the requested movement.</p></section>
           {R.unlocked.length > 0 && <p className="mt-4 rounded-2xl bg-gold/20 p-4 text-sm"><b>New unlock:</b> {R.unlocked.join(", ")}. Open “Customize”.</p>}
           {!R.saved && <p role="alert" className="mt-4 rounded-2xl bg-lav/40 p-4 text-sm">{msg ?? "This game couldn’t be saved."}</p>}
           <button className="btn-primary mt-6 min-h-[60px] w-full text-lg" onClick={onPlay}>Play again</button>
