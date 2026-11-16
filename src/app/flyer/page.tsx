@@ -50,7 +50,7 @@ const fresh = (plan: K[], wh: number) => {
     plan, si: 0, stage: "ready" as "ready" | "play" | "done", stageT: 0, readyLeft: 6,
     per: plan.map(k => ({ k, valid: 0, on: 0, gates: 0, coins: 0, misses: 0 })) as Per[],
     adjust: false, pauses: 0, lostSince: null as number | null, manual: false,
-    assist: null as null | { t: number; from: number; to: number }, invuln: 0, finished: false,
+    assist: null as null | { t: number; from: number; to: number }, invuln: 0, finished: false, out: false,
   };
 };
 type G = ReturnType<typeof fresh>;
@@ -210,7 +210,7 @@ export default function Flight() {
   const [st, setSt] = useState<Settings>(AUTO);
   const [msg, setMsg] = useState<string | null>(null), [busy, setBusy] = useState(false), [preview, setPreview] = useState(true), [gainUi, setGainUi] = useState(1.7);
   const [box, setBox] = useState({ w: 360, h: 640 });
-  const [ui, setUi] = useState({ stage: "ready" as "ready" | "play" | "done", si: 0, total: 4, ready: 6, left: 20, adjust: false, paused: false, k: "smile" as K });
+  const [ui, setUi] = useState({ stage: "ready" as "ready" | "play" | "done", si: 0, total: 4, ready: 6, left: 20, adjust: false, paused: false, k: "smile" as K, lives: 3 });
   const [result, setResult] = useState<Result | null>(null), [games, setGames] = useState<GameRow[] | null>(null);
   const calRef = useRef(cal); calRef.current = cal; const hap = useRef({ act: false }); const hapOn = useRef(true); hapOn.current = st.haptics;
   const P = useRef(prof); P.current = prof;
@@ -330,7 +330,7 @@ export default function Flight() {
       const wh = clamp(Math.round(W * innerHeight / innerWidth), 560, 800), sc = Math.min(innerWidth / W, innerHeight / wh);
       cfg.current = { secs: st.len / plan.length, gap: eff.gap, pace: eff.pace, auto: st.auto }; liveGain.current = eff.gain; setGainUi(eff.gain);
       g.current = fresh(plan, wh); setBox({ w: W * sc, h: wh * sc });
-      setUi({ stage: "ready", si: 0, total: plan.length, ready: 6, left: Math.ceil(st.len / plan.length), adjust: false, paused: false, k: plan[0] }); setView("play");
+      setUi({ stage: "ready", si: 0, total: plan.length, ready: 6, left: Math.ceil(st.len / plan.length), adjust: false, paused: false, k: plan[0], lives: 3 }); setView("play");
     } catch (e: any) { stop(); setMsg(e?.name === "NotAllowedError" ? "Camera access is blocked. Allow it in your browser’s site settings, then try again." : `Couldn’t start the camera: ${e?.message ?? e}`); setView("hub"); }
     setBusy(false);
   }
@@ -351,7 +351,7 @@ export default function Flight() {
     }
     if (!ok) setResult(r => (r ? { ...r, saved: false } : r));
   }
-  useEffect(() => { if (view === "play" && ui.stage === "done") finish(true); }, [ui.stage]);
+  useEffect(() => { if (view === "play" && ui.stage === "done") finish(!g.current.out); }, [ui.stage]);
 
   async function openStats() {
     setView("stats"); setGames(null);
@@ -403,7 +403,7 @@ export default function Flight() {
       for (const q of s.pillars) {
         const px = q.x - s.scroll;
         if (!q.passed && px + 26 < BX - 14) { q.passed = true; if (!q.hit) { s.gates++; s.points += 10; s.streak++; s.best = Math.max(s.best, s.streak); p.gates++; } }
-        if (s.invuln <= 0 && !s.assist && Math.abs(BX - px) < 37 && (s.y - 11 < q.c - q.gap / 2 || s.y + 11 > q.c + q.gap / 2)) { s.assist = { t: 0, from: s.y, to: q.c }; s.invuln = 1.6; q.hit = true; s.misses++; s.streak = 0; p.misses++; }
+        if (s.invuln <= 0 && !s.assist && Math.abs(BX - px) < 37 && (s.y - 11 < q.c - q.gap / 2 || s.y + 11 > q.c + q.gap / 2)) { s.assist = { t: 0, from: s.y, to: q.c }; s.invuln = 1.6; q.hit = true; s.misses++; s.streak = 0; p.misses++; if (s.misses >= 3) { s.out = true; s.stage = "done"; return; } }
       }
       for (const co of s.coins) if (!co.got && Math.hypot(co.x - s.scroll - BX, co.y - s.y) < 24) { co.got = true; s.coinsGot++; s.points += 5; p.coins++; }
       if (s.pillars.length > 12) s.pillars = s.pillars.filter(q => q.x - s.scroll > -100);
@@ -416,7 +416,7 @@ export default function Flight() {
       drawWorld(ctx, g.current, reduce ? 0 : now, P.current.color || an.col, P.current.acc, P.current.kind);
     };
     raf = requestAnimationFrame(loop);
-    const id = setInterval(() => { const s = g.current; setUi({ stage: s.stage, si: s.si, total: s.plan.length, ready: Math.max(0, Math.ceil(s.readyLeft)), left: Math.max(0, Math.ceil(cfg.current.secs - s.stageT)), adjust: s.adjust, paused: s.manual, k: s.plan[Math.min(s.si, s.plan.length - 1)] }); }, 100);
+    const id = setInterval(() => { const s = g.current; setUi({ stage: s.stage, si: s.si, total: s.plan.length, ready: Math.max(0, Math.ceil(s.readyLeft)), left: Math.max(0, Math.ceil(cfg.current.secs - s.stageT)), adjust: s.adjust, paused: s.manual, k: s.plan[Math.min(s.si, s.plan.length - 1)], lives: Math.max(0, 3 - s.misses) }); }, 100);
     return () => { cancelAnimationFrame(raf); clearInterval(id); removeEventListener("resize", fit); document.body.style.overflow = ""; document.documentElement.style.overscrollBehavior = ""; };
   }, [view]);
 
@@ -577,11 +577,11 @@ export default function Flight() {
     if (view === "results" && result) {
       const R = result;
       return (
-        <Page><h1 className="font-display text-3xl">{R.completed ? "Flight complete." : "Flight ended early."}</h1>
-          <p className="mt-2 text-navy/70">Thanks for flying. Every flight counts.</p>
+        <Page><h1 className="font-display text-3xl">{R.completed ? "Flight complete." : "Flight over."}</h1>
+          <p className="mt-2 text-navy/70">{R.completed ? "Thanks for flying. Every flight counts." : "Three bumps and the flight is over. Every flight is practice."}</p>
           <div className="mt-5 grid grid-cols-2 gap-3">{([["Points", String(R.points)], ["Accuracy", `${Math.round(R.accuracy)}%`], ["Coins", String(R.coins)], ["Missed gates", String(R.misses)]] as [string, string][]).map(([k, v]) => <div key={k} className="rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-4xl">{v}</div><div className="text-xs text-navy/60">{k}</div></div>)}
             <div className="col-span-2 rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-4xl">{R.bestStreak}</div><div className="text-xs text-navy/60">Best streak (gates in a row)</div></div></div>
-          <p className="mt-2 text-xs text-navy/60">A missed gate is a bump into a pillar. You’re guided back, and nothing is lost.</p>
+          <p className="mt-2 text-xs text-navy/60">A missed gate is a bump into a pillar. Three bumps end the flight.</p>
           <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">Accuracy by movement</h2>
             <ul className="mt-4 grid gap-4">{R.per.map(p => { const pct = Math.round(p.accuracy); return <li key={p.k} className="flex items-center gap-3"><FaceArt k={p.k} size={40} /><div className="min-w-0 flex-1"><div className="flex items-baseline justify-between gap-2 text-sm"><span>{EXPR[p.k].name}</span><b>{pct}%</b></div>
               <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-mist" role="img" aria-label={`${EXPR[p.k].name}: ${pct} percent`}><div className="h-full rounded-full bg-teal" style={{ width: `${pct}%` }} /></div>
@@ -605,7 +605,8 @@ export default function Flight() {
             <div className="flex items-center gap-3 px-4" style={{ height: BANNER_H }}>
               <FaceArt k={ui.k} size={76} />
               <div className="min-w-0 flex-1" role="status"><div className="text-xs text-navy/60">Expression {ui.si + 1} of {ui.total}</div>
-                <div className="font-display text-2xl leading-tight">{EXPR[ui.k].name}</div><div className="text-sm text-navy/80">{EXPR[ui.k].cue}</div></div>
+                <div className="font-display text-2xl leading-tight">{EXPR[ui.k].name}</div><div className="text-sm text-navy/80">{EXPR[ui.k].cue}</div>
+                <div className="mt-1 flex gap-1" aria-label={`${ui.lives} of 3 chances left`}>{[0, 1, 2].map(i => <svg key={i} width="18" height="16" viewBox="0 0 24 22" aria-hidden><path d="M12 21C5 15 1 11.5 1 7.2 1 4 3.4 2 6.2 2c2.3 0 4.2 1.2 5.8 3.3C13.6 3.2 15.5 2 17.8 2 20.6 2 23 4 23 7.2 23 11.5 19 15 12 21z" fill={i < ui.lives ? "#e8638a" : "none"} stroke="#e8638a" strokeOpacity={i < ui.lives ? 1 : .45} strokeWidth="1.6" /></svg>)}</div></div>
               <div className="grid h-16 w-16 shrink-0 place-items-center rounded-full border-4 border-teal text-3xl font-bold" aria-label={`${ui.left} seconds left`}>{ui.left}</div>
             </div></div></div>
         <button aria-label="Pause" onClick={() => { g.current.manual = true; }} className="absolute z-20 grid h-14 w-14 place-items-center rounded-full bg-paper/90 shadow-soft" style={{ left: 12, top: `calc(env(safe-area-inset-top, 0px) + ${BANNER_H + 10}px)` }}>
