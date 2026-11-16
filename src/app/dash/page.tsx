@@ -416,7 +416,7 @@ export default function Dash() {
       const { len, start, ramp } = cfg.current;
       s.t += dt; const prog = clamp(s.t / len, 0, 1);
       s.mul += (1 - s.mul) * Math.min(1, dt * .7);
-      const base = s.tut >= 0 ? 9 : start * (1 + (ramp - 1) * prog), v = base * s.mul; s.speed = v; s.top = Math.max(s.top, base); s.dist += v * dt;
+      const base = s.tut >= 0 ? 9 : start + start * (ramp - 1) * (1 - Math.exp(-s.t / 40)) / (1 - Math.exp(-len / 40)), v = base * s.mul; s.speed = v; s.top = Math.max(s.top, base); s.dist += v * dt;
       s.cd -= dt; s.invuln = Math.max(0, s.invuln - dt); s.flyLock = Math.max(0, s.flyLock - dt); s.bearT = Math.max(0, s.bearT - dt);
       for (const m of MOVES) s.pend[m] = edge[m] ? .3 : Math.max(0, s.pend[m] - dt);
       if (s.cd <= 0 && s.pend.right > 0 && s.lane < 2) { s.lane++; s.cd = .12; s.counts.right++; s.pend.right = 0; }
