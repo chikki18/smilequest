@@ -393,7 +393,7 @@ export default function Flight() {
       const pil = s.pillars.find(q => q.x - s.scroll + 30 > BX);
       const aim = ahead ? ahead.y : (pil && pil.x - s.scroll < BX + 200 ? pil.c : s.mid);
       if (s.active) s.vy += (clamp((aim - s.y) * 3, -200, 200) - s.vy) * Math.min(1, dt * 6);
-      else s.vy += (70 - s.vy) * Math.min(1, dt * 2.5);
+      else s.vy += (175 - s.vy) * Math.min(1, dt * 5);
       s.scroll += cfg.current.pace * dt; s.invuln = Math.max(0, s.invuln - dt);
       if (s.assist) { s.assist.t += dt; const q = Math.min(1, s.assist.t / .5); s.y = s.assist.from + (s.assist.to - s.assist.from) * (q * q * (3 - 2 * q)); s.vy = 0; if (q >= 1) s.assist = null; }
       else s.y += s.vy * dt;
