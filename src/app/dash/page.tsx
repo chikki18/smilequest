@@ -18,7 +18,7 @@ const INFO: Record<M, { name: string; action: string; cue: string; tip: string; 
 const SHORT: Record<M, string> = { jump: "Smile\nJump", fly: "Brows\nFly", duck: "Frown\nDuck", right: "Pucker →\nRight", left: "← Pucker\nLeft" };
 type Move = { key: SK; nm: number; std: number; peak: number; range: number; detectable: boolean };
 type Cal = Record<M, Move>;
-const MIN: Record<SK, number> = { smile: .015, brow: .015, frown: .05, sideA: .08, sideB: .08 };
+const MIN: Record<SK, number> = { smile: .015, brow: .015, frown: .04, sideA: .08, sideB: .08 };
 const sigs = (v: Vals): Record<SK, number> => ({ smile: v.smile, brow: v.brow, frown: v.frown, sideA: v.sideA - 0.6 * v.sideB + 0.3 * v.pucker, sideB: v.sideB - 0.6 * v.sideA + 0.3 * v.pucker });
 const SKS: SK[] = ["smile", "brow", "frown", "sideA", "sideB"];
 const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / (a.length || 1);
@@ -45,7 +45,7 @@ type Kind = "hurdle" | "bar" | "wall" | "full";
 type Row = { z: number; kind: Kind; lanes: number[]; zone: boolean; threat: boolean | null; hit: boolean; done: boolean; hold?: boolean };
 type Coin = { z: number; lane: number; cy: number; got: boolean };
 type G = {
-  stage: "ready" | "play" | "done"; readyLeft: number; t: number; dist: number; lane: number; lanePos: number; cd: number; jumpT: number; crouchT: number; jet: number; fuel: number;
+  stage: "ready" | "play" | "done"; readyLeft: number; t: number; dist: number; lane: number; lanePos: number; cd: number; jumpT: number; crouchT: number; jh: number; act: M[]; jet: number; fuel: number;
   on: Record<M, boolean>; lev: Record<M, number>; rows: Row[]; coins: Coin[]; spawnZ: number; speed: number; mul: number; invuln: number; coinsGot: number; points: number;
   streak: number; best: number; cleared: number; stumbles: number; top: number; counts: Record<M, number>; clearedBy: Record<string, number>; stumbledBy: Record<string, number>;
   lostSince: number | null; adjust: boolean; manual: boolean; wh: number; py: number; hint: string; run: number; pend: Record<M, number>;
@@ -53,7 +53,7 @@ type G = {
 };
 const z5 = () => ({ jump: 0, fly: 0, duck: 0, right: 0, left: 0 });
 const fresh = (wh: number): G => ({
-  stage: "ready", readyLeft: 6, t: 0, dist: 0, lane: 1, lanePos: 1, cd: 0, jumpT: 0, crouchT: 0, jet: 0, fuel: 1,
+  stage: "ready", readyLeft: 6, t: 0, dist: 0, lane: 1, lanePos: 1, cd: 0, jumpT: 0, crouchT: 0, jh: 0, act: [], jet: 0, fuel: 1,
   on: { jump: false, fly: false, duck: false, right: false, left: false }, lev: z5(), rows: [], coins: [], spawnZ: 60, speed: 0, mul: 1, invuln: 0, coinsGot: 0, points: 0,
   streak: 0, best: 0, cleared: 0, stumbles: 0, top: 0, counts: z5(), clearedBy: {}, stumbledBy: {}, lostSince: null, adjust: false, manual: false, wh, py: wh - BOTBAR - 40, hint: "", run: 0, pend: z5(),
   tut: -1, tutHit: false, tutWait: 0, tutFlash: "", hold: 0, flyLock: 0, caught: 0, bearY: 190, bearT: 0,
@@ -66,16 +66,16 @@ function spawnRow(s: G, len: number) {
     for (let i = 0; i < n; i++) { const z = s.spawnZ + i * 5; s.rows.push({ z, kind, lanes: [l], zone: false, threat: null, hit: false, done: false, hold: true }); if (i < n - 1) s.coins.push({ z: z + 2.5, lane: l, cy: kind === "hurdle" ? .75 : 0, got: false }); }
     s.spawnZ += (n - 1) * 5 + Math.max(24, 36 - 12 * p) + rnd(0, 6); return;
   }
-  const pool: Kind[] = ["hurdle"]; if (s.t > 6) pool.push("wall"); if (s.t > 12) pool.push("bar", "hurdle"); if (s.t > 20) pool.push("full", "wall");
+  const pool: Kind[] = ["hurdle"]; if (s.t > 6) pool.push("wall"); if (s.t > 12) pool.push("bar", "hurdle"); if (s.t > 20) pool.push("wall");
   const kind = pool[Math.floor(Math.random() * pool.length)];
   const all = [0, 1, 2].sort(() => Math.random() - .5);
-  const n = kind === "full" ? 3 : kind === "wall" ? 1 + (p > .35 && Math.random() < .4 ? 1 : 0) : 1 + Math.floor(Math.random() * (p > .3 ? 3 : 2));
-  const lanes = all.slice(0, Math.min(3, n)).sort();
+  const n = kind === "wall" ? 1 + (p > .35 && Math.random() < .4 ? 1 : 0) : 1 + (p > .3 && Math.random() < .5 ? 1 : 0);
+  const lanes = all.slice(0, Math.min(2, n)).sort();
   s.rows.push({ z: s.spawnZ, kind, lanes, zone: false, threat: null, hit: false, done: false });
   const free = [0, 1, 2].filter(l => !lanes.includes(l));
   if (kind === "hurdle") { const l = lanes[0]; for (const dz of [-4, 0, 4]) s.coins.push({ z: s.spawnZ + dz, lane: l, cy: .75, got: false }); }
   else if (kind === "bar") { for (const dz of [-3, 0, 3]) s.coins.push({ z: s.spawnZ + dz, lane: lanes[0], cy: 0, got: false }); }
-  else if (kind === "wall" && free.length) { for (const dz of [-4, 0, 4]) s.coins.push({ z: s.spawnZ + dz, lane: free[0], cy: 0, got: false }); }
+  else if (kind === "wall") { for (const dz of [-4, 0, 4]) s.coins.push({ z: s.spawnZ + dz, lane: free[0], cy: 0, got: false }); if (lanes.length === 1) for (const dz of [-3, 0, 3]) s.coins.push({ z: s.spawnZ + dz, lane: lanes[0], cy: 1.1, got: false }); }
   else if (kind === "full") { for (const dz of [-8, -4, 0, 4, 8]) s.coins.push({ z: s.spawnZ + dz, lane: 1, cy: 1.1, got: false }); }
   s.spawnZ += Math.max(22, 36 - 12 * p) + rnd(0, 6);
 }
@@ -85,8 +85,8 @@ const TUT: { kind: Kind; n: number; text: string }[] = [
   { kind: "bar", n: 1, text: "Frown to duck" },
   { kind: "wall", n: 1, text: "Pucker left or right to change lanes" },
   { kind: "full", n: 1, text: "Raise your eyebrows to fly" },
-  { kind: "hurdle", n: 4, text: "Hold your smile to stay in the air" },
-  { kind: "bar", n: 4, text: "Hold your frown to stay low" },
+  { kind: "hurdle", n: 3, text: "Keep smiling to stay up" },
+  { kind: "bar", n: 3, text: "Keep frowning to stay low" },
 ];
 function tutSpawn(s: G, dt: number) {
   s.tutWait = Math.max(0, s.tutWait - dt);
@@ -95,7 +95,7 @@ function tutSpawn(s: G, dt: number) {
   if (s.rows.length) { s.rows = []; s.tutWait = 1.6; if (!s.tutHit) { s.tut++; s.tutFlash = "Nice!"; } else s.tutFlash = "Let’s try that again"; s.tutHit = false; return; }
   if (s.tutWait > 0) return;
   const T = TUT[s.tut]; s.tutFlash = "";
-  for (let i = 0; i < T.n; i++) s.rows.push({ z: s.dist + 34 + i * 5, kind: T.kind, lanes: [s.lane], zone: false, threat: null, hit: false, done: false, hold: T.n > 1 });
+  for (let i = 0; i < T.n; i++) s.rows.push({ z: s.dist + 34 + i * 4, kind: T.kind, lanes: [s.lane], zone: false, threat: null, hit: false, done: false, hold: T.n > 1 });
 }
 
 type Pal = Record<string, string>;
@@ -225,8 +225,8 @@ function drawWorld(c: CanvasRenderingContext2D, s: G, now: number) {
   objs.sort((a, b) => b.d - a.d);
   for (const o of objs) if (o.d >= 0) o.draw();
   // player
-  const px = cx + (s.lanePos - 1) * LANE, jumpH = s.jumpT > 0 ? Math.sin(Math.PI * (1 - s.jumpT / .7)) : 0, lift = jumpH * 80 + s.jet * 120;
-  const crouch = s.crouchT > 0 && lift < 5, bodyH = crouch ? 40 : 66, y0 = PY - lift;
+  const px = cx + (s.lanePos - 1) * LANE, jumpH = s.jh, lift = jumpH * 80 + s.jet * 120;
+  const crouch = s.crouchT > .5 && lift < 5, bodyH = crouch ? 40 : 66, y0 = PY - lift;
   c.fillStyle = "rgba(0,0,0,.32)"; c.beginPath(); c.ellipse(px, PY + 2, 24 - lift * .07, 7, 0, 0, 7); c.fill();
   if (lift < 5) for (let i = 0; i < 4; i++) { const t = (now / 320 + i * .25) % 1; c.fillStyle = `rgba(214,198,160,${(1 - t) * .35})`; c.beginPath(); c.arc(px + (i - 1.5) * 9, PY - t * 10, 3 + t * 6, 0, 7); c.fill(); }
   { const lvl = clamp(s.stumbles, 1, 3), tgt = s.caught > 0 ? 6 : s.bearT > 0 ? (lvl >= 3 ? 22 : lvl === 2 ? 52 : 82) : 200; s.bearY += (tgt - s.bearY) * .1;
@@ -408,8 +408,8 @@ export default function Dash() {
       s.lostSince = null; s.adjust = false;
       const cal = calRef.current; if (!cal) return; const sg = sigs(fr.vals), edge: Record<M, boolean> = { jump: false, fly: false, duck: false, right: false, left: false };
       for (const m of MOVES) {
-        const c = cal[m]; let l = clamp(liveGain.current * (sg[c.key] - c.nm) / c.range, 0, 1); if (l < .1) l = 0;
-        s.lev[m] += (l - s.lev[m]) * .5; const was = s.on[m], on = was ? s.lev[m] >= .3 : s.lev[m] >= .55; s.on[m] = on; edge[m] = on && !was;
+        const c = cal[m]; let l = clamp(liveGain.current * (m === "jump" ? .72 : m === "duck" ? 1.3 : 1) * (sg[c.key] - c.nm) / c.range, 0, 1); if (l < .1) l = 0;
+        s.lev[m] += (l - s.lev[m]) * .6; const was = s.on[m], on = was ? s.lev[m] >= (m === "jump" ? .42 : .3) : s.lev[m] >= (m === "jump" ? .6 : .5); s.on[m] = on; edge[m] = on && !was;
       }
       if (s.stage === "ready") { s.readyLeft -= dt; if (s.readyLeft <= 0) { s.stage = "play"; if (cfg.current.haptics) buzz(150); } return; }
       if (s.caught > 0) { s.caught -= dt; s.dist += s.speed * Math.max(0, s.caught) / 1.2 * dt; s.bearT = 9; if (s.caught <= 0 && !finished) { finished = true; s.stage = "done"; finish(false, true); } return; }
@@ -418,18 +418,21 @@ export default function Dash() {
       s.mul += (1 - s.mul) * Math.min(1, dt * .7);
       const base = s.tut >= 0 ? 9 : start * (1 + (ramp - 1) * prog), v = base * s.mul; s.speed = v; s.top = Math.max(s.top, base); s.dist += v * dt;
       s.cd -= dt; s.invuln = Math.max(0, s.invuln - dt); s.flyLock = Math.max(0, s.flyLock - dt); s.bearT = Math.max(0, s.bearT - dt);
-      for (const m of MOVES) s.pend[m] = edge[m] ? .35 : Math.max(0, s.pend[m] - dt);
+      for (const m of MOVES) s.pend[m] = edge[m] ? .3 : Math.max(0, s.pend[m] - dt);
       if (s.cd <= 0 && s.pend.right > 0 && s.lane < 2) { s.lane++; s.cd = .12; s.counts.right++; s.pend.right = 0; }
       else if (s.cd <= 0 && s.pend.left > 0 && s.lane > 0) { s.lane--; s.cd = .12; s.counts.left++; s.pend.left = 0; }
-      if (edge.fly && s.flyLock <= 0 && s.fuel > 0) { s.jumpT = 0; s.crouchT = 0; s.pend.jump = 0; s.pend.duck = 0; s.hold = 0; }
-      if (s.pend.jump > 0) { s.crouchT = 0; if (s.jet > .05) { s.jet = 0; s.flyLock = .4; } if (s.jumpT <= 0) { s.jumpT = .7; s.counts.jump++; s.pend.jump = 0; } }
-      if (s.pend.duck > 0) { s.jumpT = 0; s.hold = 0; if (s.jet > .05) { s.jet = 0; s.flyLock = .4; } s.crouchT = .55; s.counts.duck++; s.pend.duck = 0; }
-      else if (s.on.duck && s.crouchT > 0) s.crouchT = Math.max(s.crouchT, .15);
-      if (!s.on.jump) s.hold = 0; else if (s.jumpT > 0 && s.jumpT < .36 && s.hold < 1.8 && s.jet < .3) { s.jumpT = .36; s.hold += dt; }
-      s.crouchT = Math.max(0, s.crouchT - dt); s.jumpT = Math.max(0, s.jumpT - dt);
-      if (s.on.fly && s.fuel > 0 && s.flyLock <= 0) { if (edge.fly) s.counts.fly++; s.jet = Math.min(1.1, s.jet + dt * 4); s.fuel -= dt / 2.6; }
-      else { s.jet = Math.max(0, s.jet - dt * 3.5); if (!s.on.fly) s.fuel = Math.min(1, s.fuel + dt / 5); }
-      const jumpH = s.jumpT > 0 ? Math.sin(Math.PI * (1 - s.jumpT / .7)) : 0, h = Math.max(jumpH, Math.min(1, s.jet)), crouch = s.crouchT > 0 && h < .1;
+      for (const m of ["jump", "duck", "fly"] as M[]) {
+        if (edge[m]) { s.act = s.act.filter(x => x !== m); s.act.push(m); if (m === "jump") s.counts.jump++; else if (m === "duck") s.counts.duck++; else if (s.fuel > 0) s.counts.fly++; }
+        if (!s.on[m]) s.act = s.act.filter(x => x !== m);
+      }
+      const cur = s.act[s.act.length - 1];
+      if (cur === "jump" && s.jh > .5) s.hold += dt; else if (!s.on.jump) s.hold = 0;
+      const jt = cur === "jump" && s.hold < 2 ? 1 : 0;
+      s.jh += clamp(jt - s.jh, -dt * 7, dt * 9);
+      s.crouchT += clamp((cur === "duck" ? 1 : 0) - s.crouchT, -dt * 10, dt * 10);
+      if (cur === "fly" && s.fuel > 0) { s.jet = Math.min(1.1, s.jet + dt * 5); s.fuel -= dt / 2.6; }
+      else { s.jet = Math.max(0, s.jet - dt * 5); if (!s.on.fly) s.fuel = Math.min(1, s.fuel + dt / 5); }
+      const h = Math.max(s.jh, Math.min(1, s.jet)), crouch = s.crouchT > .5 && h < .1;
       s.lanePos += (s.lane - s.lanePos) * Math.min(1, dt * 10);
       if (s.tut >= 0) tutSpawn(s, dt); else while (s.spawnZ < s.dist + 95) spawnRow(s, len);
       let hint = "";
@@ -443,8 +446,8 @@ export default function Dash() {
         }
         if (!r.done && dd < -1.2) { r.done = true; if (!r.hit && r.threat) { s.cleared++; s.points += 10; s.streak++; s.best = Math.max(s.best, s.streak); s.clearedBy[r.kind] = (s.clearedBy[r.kind] ?? 0) + 1; } }
         if (!hint && !r.done && dd > 0 && dd < 45 && r.lanes.includes(s.lane) && !r.hit) {
-          if (r.kind === "hurdle") hint = r.hold ? "Hold your smile" : "Smile to jump";
-          else if (r.kind === "bar") hint = r.hold ? "Hold your frown" : "Frown to duck";
+          if (r.kind === "hurdle") hint = r.hold ? "Keep smiling" : "Smile to jump";
+          else if (r.kind === "bar") hint = r.hold ? "Keep frowning" : "Frown to duck";
           else if (r.kind === "full") hint = "Raise your eyebrows to fly";
           else { const free = [0, 1, 2].filter(l => !r.lanes.includes(l)).sort((a, b) => Math.abs(a - s.lane) - Math.abs(b - s.lane))[0]; hint = free == null ? "Raise your eyebrows to fly" : free > s.lane ? "Pucker to your right" : "Pucker to your left"; }
         }
@@ -512,7 +515,7 @@ export default function Dash() {
       <Page><h1 className="font-display text-3xl">How to play</h1><Rule />
         <p className="mt-2 text-navy/70">Your runner keeps running. Use these five movements to dodge, jump and fly. The run gets faster as it goes.</p>
         <ul className="mt-4 grid gap-2">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded-2xl bg-paper p-3 shadow-soft"><Rune m={m} size={44} /><span className="flex-1"><b>{INFO[m].action}</b><br /><span className="text-sm text-navy/70">{INFO[m].name}</span></span></li>)}</ul>
-        <p className="mt-3 text-xs text-navy/60">Hold your smile or frown to cross a row of obstacles. Three stumbles and the bear catches up, so go gently.</p>
+        <p className="mt-3 text-xs text-navy/60">Keep smiling or frowning to cross a row of obstacles. Three stumbles and the bear catches up, so go gently.</p>
         {msg && <p role="alert" className="mt-3 rounded-2xl bg-lav/50 p-3 text-sm">{msg}</p>}
         <button className="btn-primary mt-5 min-h-[64px] w-full text-xl" disabled={busy} onClick={() => startGame()}>{busy ? "Starting camera…" : "Start running"}</button>
         <button className="btn-quiet mt-3 w-full" onClick={() => setView("hub")}>Back</button></Page>);
