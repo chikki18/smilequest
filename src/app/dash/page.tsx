@@ -9,7 +9,7 @@ type M = "jump" | "fly" | "duck" | "right" | "left";
 const MOVES: M[] = ["jump", "fly", "duck", "right", "left"];
 type SK = "smile" | "brow" | "frown" | "sideA" | "sideB";
 const INFO: Record<M, { name: string; action: string; cue: string; tip: string; icon: string }> = {
-  jump: { name: "Smile", action: "Jump", cue: "Smile to jump", tip: "A gentle smile. Never force it.", icon: "😊" },
+  jump: { name: "Smile", action: "Jump", cue: "Smile to jump", tip: "A closed-mouth smile or a smile with teeth. Never force it.", icon: "😊" },
   fly: { name: "Eyebrow raise", action: "Jetpack", cue: "Raise your eyebrows to fly", tip: "Lift them gently, as if mildly surprised. Hold to keep flying.", icon: "🤨" },
   duck: { name: "Frown", action: "Duck", cue: "Frown to duck", tip: "Turn the corners of your mouth down. Just the mouth, no brows.", icon: "☹️" },
   right: { name: "Pucker to your right", action: "Move right", cue: "Pucker to your right to move right", tip: "Round your lips like “ooo” and nudge them toward your right cheek.", icon: "😗" },
@@ -53,17 +53,17 @@ type G = {
 };
 const z5 = () => ({ jump: 0, fly: 0, duck: 0, right: 0, left: 0 });
 const fresh = (wh: number): G => ({
-  stage: "ready", readyLeft: 6, t: 0, dist: 0, lane: 1, lanePos: 1, cd: 0, jumpT: 0, crouchT: 0, jh: 0, act: [], jet: 0, fuel: 1,
+  stage: "ready", readyLeft: .25, t: 0, dist: 0, lane: 1, lanePos: 1, cd: 0, jumpT: 0, crouchT: 0, jh: 0, act: [], jet: 0, fuel: 1,
   on: { jump: false, fly: false, duck: false, right: false, left: false }, lev: z5(), rows: [], coins: [], spawnZ: 60, speed: 0, mul: 1, invuln: 0, coinsGot: 0, points: 0,
   streak: 0, best: 0, cleared: 0, stumbles: 0, top: 0, counts: z5(), clearedBy: {}, stumbledBy: {}, lostSince: null, adjust: false, manual: false, wh, py: wh - BOTBAR - 40, hint: "", run: 0, pend: z5(),
-  tut: -1, tutHit: false, tutWait: 0, tutFlash: "", hold: 0, flyLock: 0, caught: 0, bearY: 190, bearT: 0,
+  tut: -1, tutHit: false, tutWait: 0, tutFlash: "", hold: 0, flyLock: 0, caught: 0, bearY: 230, bearT: 0,
 });
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 function spawnRow(s: G, len: number) {
   const p = clamp(s.t / len, 0, 1);
   if (s.t > 8 && Math.random() < (p > .4 ? .3 : .2)) {
     const kind: Kind = Math.random() < .6 ? "hurdle" : "bar", n = 3 + (Math.random() < .5 ? 1 : 0), l = Math.floor(Math.random() * 3);
-    for (let i = 0; i < n; i++) { const z = s.spawnZ + i * 5; s.rows.push({ z, kind, lanes: [l], zone: false, threat: null, hit: false, done: false, hold: true }); if (i < n - 1) s.coins.push({ z: z + 2.5, lane: l, cy: kind === "hurdle" ? .75 : 0, got: false }); }
+    for (let i = 0; i < n; i++) { const z = s.spawnZ + i * 5; s.rows.push({ z, kind, lanes: [l], zone: false, threat: null, hit: false, done: false, hold: true }); if (i < n - 1) s.coins.push({ z: z + 2.5, lane: l, cy: kind === "hurdle" ? 1 : 0, got: false }); }
     s.spawnZ += (n - 1) * 5 + Math.max(24, 36 - 12 * p) + rnd(0, 6); return;
   }
   const pool: Kind[] = ["hurdle"]; if (s.t > 6) pool.push("wall"); if (s.t > 12) pool.push("bar", "hurdle"); if (s.t > 20) pool.push("wall");
@@ -73,10 +73,10 @@ function spawnRow(s: G, len: number) {
   const lanes = all.slice(0, Math.min(2, n)).sort();
   s.rows.push({ z: s.spawnZ, kind, lanes, zone: false, threat: null, hit: false, done: false });
   const free = [0, 1, 2].filter(l => !lanes.includes(l));
-  if (kind === "hurdle") { const l = lanes[0]; for (const dz of [-4, 0, 4]) s.coins.push({ z: s.spawnZ + dz, lane: l, cy: .75, got: false }); }
+  if (kind === "hurdle") { const l = lanes[0]; for (const dz of [-4, 0, 4]) s.coins.push({ z: s.spawnZ + dz, lane: l, cy: 1, got: false }); }
   else if (kind === "bar") { for (const dz of [-3, 0, 3]) s.coins.push({ z: s.spawnZ + dz, lane: lanes[0], cy: 0, got: false }); }
-  else if (kind === "wall") { for (const dz of [-4, 0, 4]) s.coins.push({ z: s.spawnZ + dz, lane: free[0], cy: 0, got: false }); if (lanes.length === 1) for (const dz of [-3, 0, 3]) s.coins.push({ z: s.spawnZ + dz, lane: lanes[0], cy: 1.1, got: false }); }
-  else if (kind === "full") { for (const dz of [-8, -4, 0, 4, 8]) s.coins.push({ z: s.spawnZ + dz, lane: 1, cy: 1.1, got: false }); }
+  else if (kind === "wall") { for (const dz of [-4, 0, 4]) s.coins.push({ z: s.spawnZ + dz, lane: free[0], cy: 0, got: false }); if (lanes.length === 1) for (const dz of [-3, 0, 3]) s.coins.push({ z: s.spawnZ + dz, lane: lanes[0], cy: 1, got: false }); }
+  else if (kind === "full") { for (const dz of [-8, -4, 0, 4, 8]) s.coins.push({ z: s.spawnZ + dz, lane: 1, cy: 1, got: false }); }
   s.spawnZ += Math.max(22, 36 - 12 * p) + rnd(0, 6);
 }
 
@@ -217,7 +217,7 @@ function drawWorld(c: CanvasRenderingContext2D, s: G, now: number) {
   }
   for (const co of s.coins) {
     if (co.got) continue; const d = co.z - s.dist; if (d > 95 || d < -6) continue; const sc = sOf(d), y = yOf(sc), x = cx + (co.lane - 1) * LANE * sc;
-    objs.push({ d, draw: () => { const cyp = y - (16 + co.cy * 90) * sc, wv = .35 + .65 * Math.abs(Math.sin(now / 260 + co.z)); c.globalAlpha = clamp(1.3 - d / 80, .15, 1);
+    objs.push({ d, draw: () => { const cyp = y - (28 + co.cy * 82) * sc, wv = .35 + .65 * Math.abs(Math.sin(now / 260 + co.z)); c.globalAlpha = clamp(1.3 - d / 80, .15, 1);
       const gg = c.createRadialGradient(x, cyp, 1, x, cyp, 20 * sc); gg.addColorStop(0, P.coinGlow + ".45)"); gg.addColorStop(1, P.coinGlow + "0)"); c.fillStyle = gg; c.beginPath(); c.arc(x, cyp, 20 * sc, 0, 7); c.fill();
       c.fillStyle = P.coin; c.strokeStyle = P.coinEdge; c.lineWidth = Math.max(1, 1.6 * sc); c.beginPath(); c.ellipse(x, cyp, 11 * sc * wv, 11 * sc, 0, 0, 7); c.fill(); c.stroke();
       c.fillStyle = P.coinHi; c.beginPath(); c.ellipse(x - 1.5 * sc * wv, cyp - 1.5 * sc, 6 * sc * wv, 6 * sc, 0, 0, 7); c.fill(); c.globalAlpha = 1; } });
@@ -229,9 +229,9 @@ function drawWorld(c: CanvasRenderingContext2D, s: G, now: number) {
   const crouch = s.crouchT > .5 && lift < 5, bodyH = crouch ? 40 : 66, y0 = PY - lift;
   c.fillStyle = "rgba(0,0,0,.32)"; c.beginPath(); c.ellipse(px, PY + 2, 24 - lift * .07, 7, 0, 0, 7); c.fill();
   if (lift < 5) for (let i = 0; i < 4; i++) { const t = (now / 320 + i * .25) % 1; c.fillStyle = `rgba(214,198,160,${(1 - t) * .35})`; c.beginPath(); c.arc(px + (i - 1.5) * 9, PY - t * 10, 3 + t * 6, 0, 7); c.fill(); }
-  { const lvl = clamp(s.stumbles, 1, 3), tgt = s.caught > 0 ? 6 : s.bearT > 0 ? (lvl >= 3 ? 22 : lvl === 2 ? 52 : 82) : 200; s.bearY += (tgt - s.bearY) * .1;
-    if (s.bearY < 150) drawBear(c, px + Math.sin(now / 190) * 5, PY + s.bearY, lvl >= 3 ? 1.3 : lvl === 2 ? 1.15 : 1, now, s.caught > 0); }
   c.globalAlpha = s.invuln > 0 && Math.floor(now / 110) % 2 ? .55 : 1; drawFox(c, px, y0, bodyH, lift, s, now); c.globalAlpha = 1;
+  { const lvl = clamp(s.stumbles, 1, 3), tgt = s.caught > 0 ? 100 : s.bearT > 0 ? (lvl >= 3 ? 100 : lvl === 2 ? 112 : 122) : 230; s.bearY += (tgt - s.bearY) * .12;
+    if (s.bearY < 210) drawBear(c, px + Math.sin(now / 190) * 4, PY + s.bearY, lvl >= 3 ? 1.05 : lvl === 2 ? .95 : .85, now, s.caught > 0); }
   for (const o of objs) if (o.d < 0) o.draw();
   // embers + vignette
   c.fillStyle = P.ember; for (let i = 0; i < 16; i++) { const x = (i * 67 + Math.sin(now / 900 + i) * 14 + W) % W, y = wh - ((now * .02 * (1 + i % 3) + i * 61) % (wh - HZ)); c.beginPath(); c.arc(x, y, 1 + (i % 3) * .5, 0, 7); c.fill(); }
@@ -369,7 +369,7 @@ export default function Dash() {
       tracker.current = await createTracker(v, f => { latest.current = f; });
       const wh = clamp(Math.round(W * innerHeight / innerWidth), 560, 800), sc = Math.min(innerWidth / W, innerHeight / wh);
       cfg.current = { len: st.len, start: st.start, ramp: st.ramp, gain: 1.3, haptics: st.haptics }; liveGain.current = 1.3; setGainUi(1.3);
-      g.current = fresh(wh); if (tut) { g.current.tut = 0; g.current.readyLeft = 4; } setBox({ w: W * sc, h: wh * sc });
+      g.current = fresh(wh); if (tut) { g.current.tut = 0; g.current.readyLeft = .25; } setBox({ w: W * sc, h: wh * sc });
       setUi(u => ({ ...u, stage: "ready", ready: 6, left: st.len, dist: 0, coins: 0, mul: 1, adjust: false, paused: false, hint: "", stumble: false, points: 0, lives: 3, tut: tut ? 0 : -1, tutText: "" })); setView("play");
     } catch (e: any) { stop(); setMsg(e?.name === "NotAllowedError" ? "Camera access is blocked. Allow it in your browser’s site settings, then try again." : `Couldn’t start the camera: ${e?.message ?? e}`); setView("hub"); }
     setBusy(false);
@@ -518,7 +518,7 @@ export default function Dash() {
         <ul className="mt-4 grid gap-2">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded-2xl bg-paper p-3 shadow-soft"><Rune m={m} size={44} /><span className="flex-1"><b>{INFO[m].action}</b><br /><span className="text-sm text-navy/70">{INFO[m].name}</span></span></li>)}</ul>
         <p className="mt-3 text-xs text-navy/60">Keep smiling or frowning to cross a row of obstacles. Three stumbles and the bear catches up, so go gently.</p>
         {msg && <p role="alert" className="mt-3 rounded-2xl bg-lav/50 p-3 text-sm">{msg}</p>}
-        <button className="btn-primary mt-5 min-h-[64px] w-full text-xl" disabled={busy} onClick={() => startGame()}>{busy ? "Starting camera…" : "Start running"}</button>
+        <button className="btn-primary mt-5 min-h-[64px] w-full text-xl" disabled={busy} onClick={() => startGame()}>{busy ? "Starting camera…" : "I’m ready"}</button>
         <button className="btn-quiet mt-3 w-full" onClick={() => setView("hub")}>Back</button></Page>);
 
     if (view === "calibrate") {
@@ -571,7 +571,8 @@ export default function Dash() {
           <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.hints} onChange={e => update({ hints: e.target.checked })} aria-label="Hints" /></label>
         <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>5. Vibration</b><br /><span className="text-sm text-navy/60">Buzz after calibration steps, at the start, and when you stumble. Works on phones that allow it.</span></span>
           <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.haptics} onChange={e => update({ haptics: e.target.checked })} aria-label="Vibration" /></label>
-        <button className="btn-primary mt-4 w-full" onClick={() => setView("hub")}>Done</button></Page>);
+        <button className="btn-quiet mt-4 w-full" onClick={() => openCalibrate("settings")}>Recalibrate</button>
+        <button className="btn-primary mt-3 w-full" onClick={() => setView("hub")}>Done</button></Page>);
 
     if (view === "stats") {
       const gs = games ?? [], done = gs.length, best = (f: (x: GameRow) => number) => gs.reduce((m, x) => Math.max(m, f(x)), 0);
@@ -602,11 +603,12 @@ export default function Dash() {
           <div className="mt-5 grid grid-cols-2 gap-3">{([["Points", String(R.points)], ["Distance", `${R.distance} m`], ["Coins", String(R.coins)], ["Obstacles cleared", String(R.cleared)], ["Stumbles", String(R.stumbles)], ["Top speed", `${R.topSpeed.toFixed(1)}`]] as [string, string][]).map(([k, v]) => <div key={k} className="rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-3xl">{v}</div><div className="text-xs text-navy/60">{k}</div></div>)}
             <div className="col-span-2 rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-3xl">{R.bestStreak}</div><div className="text-xs text-navy/60">Best streak (obstacles cleared in a row)</div></div></div>
           <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">Accuracy by movement</h2>
-            <ul className="mt-4 grid gap-4">{([["jump", "Smile", "Jump", "hurdle"], ["duck", "Frown", "Duck", "bar"], ["right", "Pucker left or right", "Change lanes", "wall"], ["fly", "Eyebrows", "Fly", "full"]] as [M, string, string, string][]).map(([m, name, act, k]) => { const a = R.acc[k], pct = a.faced > 0 ? Math.round(a.cleared / a.faced * 100) : null;
+            <ul className="mt-4 grid gap-4">{([["jump", "Smile", "Jump", "hurdle"], ["duck", "Frown", "Duck", "bar"], ["right", "Pucker left or right", "Change lanes", "wall"], ["fly", "Eyebrows", "Fly", "full"]] as [M, string, string, string][]).map(([m, name, act, k]) => { const a = R.acc[k], pct = a.faced > 0 ? Math.round(a.cleared / a.faced * 100) : null, lanes = R.counts.right + R.counts.left;
+              if (m === "right") return <li key={m} className="flex items-center gap-3"><Rune m={m} size={30} /><div className="min-w-0 flex-1"><div className="flex items-baseline justify-between gap-2 text-sm"><span>{name} <span className="text-navy/50">· {act}</span></span><b>{lanes}</b></div><div className="mt-1 text-xs text-navy/60">{lanes === 1 ? "lane change registered" : "lane changes registered"}</div></div></li>;
               return <li key={m} className="flex items-center gap-3"><Rune m={m} size={30} /><div className="min-w-0 flex-1"><div className="flex items-baseline justify-between gap-2 text-sm"><span>{name} <span className="text-navy/50">· {act}</span></span><b>{pct == null ? "–" : `${pct}%`}</b></div>
                 <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-mist" role="img" aria-label={pct == null ? `${name}: not needed this run` : `${name}: ${pct} percent`}><div className="h-full rounded-full bg-teal" style={{ width: `${pct ?? 0}%` }} /></div>
                 <div className="mt-1 text-xs text-navy/60">{a.faced > 0 ? `${a.cleared} of ${a.faced} obstacles` : m === "fly" ? `Optional · used ${R.counts.fly} time${R.counts.fly === 1 ? "" : "s"}` : "None came up"}</div></div></li>; })}</ul>
-            <p className="mt-4 text-xs text-navy/60">Accuracy is the share of obstacles you handled with the right movement.</p></section>
+            <p className="mt-4 text-xs text-navy/60">Accuracy is the share of obstacles you handled with the right movement. Lane changes are counted, not scored.</p></section>
           {!R.saved && <p role="alert" className="mt-4 rounded-2xl bg-lav/50 p-4 text-sm">{msg ?? "Saving this run…"}</p>}
           <button className="btn-primary mt-6 min-h-[60px] w-full text-lg" onClick={onPlay}>Run again</button>
           <button className="btn-quiet mt-3 w-full" onClick={openStats}>See my stats</button>
@@ -628,17 +630,12 @@ export default function Dash() {
             {ui.tut < 0 && <div className="absolute left-3 top-[64px] flex gap-1" aria-label={`${ui.lives} of 3 chances left`}>{[0, 1, 2].map(i => <svg key={i} width="22" height="20" viewBox="0 0 24 22" aria-hidden><path d="M12 21C5 15 1 11.5 1 7.2 1 4 3.4 2 6.2 2c2.3 0 4.2 1.2 5.8 3.3C13.600 3.200 15.500 2 17.800 2 20.600 2 23 4 23 7.200 23 11.500 19 15 12 21z" fill={i < ui.lives ? "#ff7a9c" : "none"} stroke="#ff7a9c" strokeOpacity={i < ui.lives ? 1 : .45} strokeWidth="1.6" /></svg>)}</div>}
           </div></div>
         {(st.hints || ui.tut >= 0) && ui.stage === "play" && ui.hint && <div className="pointer-events-none absolute inset-x-0 z-20 flex justify-center" style={{ top: "calc(env(safe-area-inset-top, 0px) + 10px)" }}><div className="w-[44%] rounded-2xl border border-[#8fd0ff]/60 bg-[#0f1038]/85 px-3 py-2 text-center dt-h text-sm leading-snug tracking-wide text-[#eceaff] shadow-soft" role="status">{ui.hint}</div></div>}
-        {ui.stumble && ui.stage === "play" && ui.tut < 0 && <div className="pointer-events-none absolute inset-x-0 z-20 text-center text-sm font-semibold text-[#eceaff]" style={{ top: "calc(env(safe-area-inset-top, 0px) + 84px)" }}>Keep going!</div>}
+        {ui.stumble && ui.stage === "play" && ui.tut < 0 && ui.lives > 0 && <div className="pointer-events-none absolute inset-x-0 z-20 text-center text-sm font-semibold text-[#eceaff]" style={{ top: "calc(env(safe-area-inset-top, 0px) + 84px)" }}>Keep going!</div>}
         <button aria-label="Pause" onClick={() => { g.current.manual = true; }} className="absolute z-20 grid h-14 w-14 place-items-center rounded-full border border-[#8fd0ff]/40 bg-[#0f1038]/80 shadow-soft" style={{ left: 12, top: "calc(env(safe-area-inset-top, 0px) + 10px)" }}>
           <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden><rect x="4" y="3" width="5" height="16" rx="1.5" fill="#8fd0ff" /><rect x="13" y="3" width="5" height="16" rx="1.5" fill="#8fd0ff" /></svg></button>
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center pb-[max(10px,env(safe-area-inset-bottom))]"><div className="grid w-full grid-cols-5 gap-1.5 px-2" style={{ maxWidth: Math.max(box.w, 320) }}>
           {MOVES.map(m => <div key={m} className={`flex flex-col items-center rounded border px-1 py-2 text-center text-[11px] leading-tight shadow-soft ${ui.on[m] ? "border-[#bfe6ff] bg-[#8fd0ff] text-[#0f1038]" : "border-[#8fd0ff]/30 bg-[#0f1038]/80 text-[#d6d4ff]"}`}><Rune m={m} size={30} on={ui.on[m]} tone="#8fd0ff" /><span className="mt-0.5 whitespace-pre-line">{SHORT[m]}</span>
             <span className="mt-1 h-1.5 w-full rounded-full bg-black/30"><span className="block h-1.5 rounded-full bg-[#ffffff]" style={{ width: `${Math.round(ui.lev[m] * 100)}%` }} /></span></div>)}</div></div>
-        {ui.stage === "ready" && !ui.paused && !ui.adjust && <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#0b0c2a]/90 px-6 text-center text-[#eceaff]" role="status">
-          <h2 className="dt-h text-4xl">Get ready</h2>
-          <ul className="mt-4 grid w-full max-w-xs gap-2 text-left">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded bg-white/10 px-3 py-2"><Rune m={m} size={34} tone="#8fd0ff" /><span className="text-lg">{INFO[m].action}</span></li>)}</ul>
-          <p className="mt-5 dt-h text-3xl">Starting in {ui.ready}</p>
-          <button className="btn-primary mt-4" onClick={() => { g.current.readyLeft = 0; }}>I’m ready, start now</button></div>}
         {ui.adjust && !ui.paused && <div className="absolute inset-0 z-40 grid place-items-center bg-[#0b0c2a]/85 p-8 text-center text-[#eceaff]" role="alert"><div><p className="dt-h text-3xl">Let’s adjust your camera</p>
           <p className="mt-3 text-base">We can’t see your face clearly. Center it and add light. The game waits, and nothing is counted against you.</p></div></div>}
         {ui.paused && <div className="absolute inset-0 z-50 grid place-items-center bg-[#0b0c2a]/85 p-6 text-[#eceaff]" role="dialog" aria-label="Paused"><div className="w-full max-w-xs text-center">
@@ -665,7 +662,7 @@ export default function Dash() {
             {msg && <p role="alert" className="mt-3 rounded-2xl bg-[#3f0f7f] p-3 text-sm">{msg}</p>}
             <button className="btn-primary mt-5 min-h-[64px] w-full text-lg uppercase tracking-[.16em]" onClick={onPlay}>Play game</button>
             {!hasCal && <p className="mt-2 text-center text-xs text-[#a9a8d6]">First time? We’ll set up your camera next.</p>}
-            <div className="mt-3 grid grid-cols-3 gap-3"><button className="btn-quiet min-h-[56px] !border-white/25 !bg-black/40 !text-white" disabled={busy} onClick={onTutorial}>Tutorial</button><button className="btn-quiet min-h-[56px] !border-white/25 !bg-black/40 !text-white" onClick={openStats}>Stats</button><button className="btn-quiet min-h-[56px] !border-white/25 !bg-black/40 !text-white" onClick={() => setView("settings")}>Settings</button></div>
+            <div className="mt-3 grid grid-cols-3 gap-3"><button className="btn-quiet min-h-[56px] !px-2 !border-white/25 !bg-black/40 !text-white" disabled={busy} onClick={onTutorial}>Tutorial</button><button className="btn-quiet min-h-[56px] !px-2 !border-white/25 !bg-black/40 !text-white" onClick={openStats}>Stats</button><button className="btn-quiet min-h-[56px] !px-2 !border-white/25 !bg-black/40 !text-white" onClick={() => setView("settings")}>Settings</button></div>
             {ios && <p className="mt-4 rounded-2xl bg-black/50 p-3 text-xs text-[#d6d4ff]">For the full-screen version on iPhone: tap the Share button in Safari, choose <b>Add to Home Screen</b>, then open SmileQuest from your home screen.</p>}
           </div>
         </div>
