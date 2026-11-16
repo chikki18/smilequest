@@ -10,7 +10,7 @@ type Step = "intro" | "align" | "rest" | Id | "review";
 const ORDER: Step[] = ["intro", "align", "rest", "smile", "brow", "frown", "pucker", "right", "left", "close", "review"];
 const MOVES: Id[] = ["smile", "brow", "frown", "pucker", "right", "left", "close"];
 const COPY: Record<Id, { title: string; cue: string; tip: string; games: string }> = {
-  smile: { title: "Smile", cue: "Close-mouth smile or smile with teeth", tip: "Either style works. Never force it.", games: "Flight · Dash" },
+  smile: { title: "Smile", cue: "Close-mouth smile", tip: "Either style works. Never force it.", games: "Flight · Dash" },
   brow: { title: "Eyebrow raise", cue: "Lift your eyebrows", tip: "Raise them gently, as if mildly surprised.", games: "Flight · Dash" },
   frown: { title: "Frown", cue: "Frown", tip: "Turn the corners of your mouth down. Keep your brows relaxed.", games: "Dash" },
   pucker: { title: "Lip pucker", cue: "Round your lips like “ooo”", tip: "Gently purse them and hold.", games: "Flight" },
