@@ -52,10 +52,15 @@ export default function Calibrate() {
   const [step, setStep] = useState<Step>("intro"), [cam, setCam] = useState<"off" | "loading" | "on">("off"), [err, setErr] = useState<string | null>(null);
   const [built, setBuilt] = useState<Built | null>(null), [saving, setSaving] = useState(false), [saved, setSaved] = useState(false);
   const [hud, setHud] = useState({ aligned: false, locked: false, hint: "Looking for your face…", progress: 0, phase: "brief" as "brief" | "count" | "hold" | "flash", skipHint: false, face: false, count: 0 as number });
-  const S = useRef({ step: "intro" as Step, alignedSince: 0, lostSince: 0, locked: false, enteredAt: 0, phase: "brief" as "brief" | "count" | "hold" | "flash", phaseStart: 0, lostAt: 0, fails: 0, skipBrief: false, over: 0, holdStart: 0, weakSince: 0, buf: [] as Vals[], restBuf: [] as Vals[], restMs: 0, last: 0, flashUntil: 0, bestKey: "sideA" as SK, rightKey: null as SK | null, neutral: null as Neutral | null, redo: false, samples: {} as Partial<Record<Id, Vals[]>>, progress: 0, hint: "", face: false, aligned: false, rough: false });
+  const S = useRef({ step: "intro" as Step, alignedSince: 0, lostSince: 0, locked: false, enteredAt: 0, phase: "brief" as "brief" | "count" | "hold" | "flash", phaseStart: 0, lostAt: 0, fails: 0, skipBrief: false, over: 0, holdStart: 0, weakSince: 0, buf: [] as Vals[], restBuf: [] as Vals[], restMs: 0, last: 0, flashUntil: 0, bestKey: "sideA" as SK, rightKey: null as SK | null, neutral: null as Neutral | null, redo: false, samples: {} as Partial<Record<Id, Vals[]>>, progress: 0, hint: "", face: false, aligned: false, rough: false, one: null as Id | null, lockRight: null as SK | null });
+  type Prev = { flight: Record<string, any>; dash: Record<string, any>; neutral: Record<string, any> };
+  const [prev, setPrev] = useState<Prev | null | undefined>(undefined), [one, setOne] = useState<Id | null>(null);
   const [first, setFirst] = useState(false); useEffect(() => { setFirst(new URLSearchParams(location.search).get("first") === "1"); }, []);
 
-  useEffect(() => { (async () => { const { data: { user } } = await supabase().auth.getUser(); if (!user) location.href = "/"; })(); return () => stop(); }, []);
+  useEffect(() => { (async () => { const { data: { user } } = await supabase().auth.getUser(); if (!user) { location.href = "/"; return; }
+    const sb = supabase(); const a = await sb.from("calibration_profiles").select("summary").eq("user_id", user.id).order("created_at", { ascending: false }).limit(1).maybeSingle(); const b = await sb.from("dash_calibration").select("summary").eq("user_id", user.id).maybeSingle();
+    const fl = (a.data as any)?.summary, da = (b.data as any)?.summary;
+    setPrev(fl || da ? { flight: fl?.moves ?? {}, dash: da?.moves ?? {}, neutral: fl?.neutral ?? {} } : null); })(); return () => stop(); }, []);
   function stop() { tracker.current?.stop(); tracker.current = null; stream.current?.getTracks().forEach(t => t.stop()); stream.current = null; latest.current = null; }
   function nextUrl() { const n = new URLSearchParams(location.search).get("next"); return n && n.startsWith("/") && !n.startsWith("//") ? n : "/dashboard"; }
 
@@ -65,11 +70,11 @@ export default function Calibrate() {
     setStep(s);
   }
   function goBack() {
-    const i = ORDER.indexOf(S.current.step), n = ORDER[i - 1];
+    const i = ORDER.indexOf(S.current.step), o = S.current.one, n = o && (S.current.step === "review" || (MOVES as string[]).includes(S.current.step)) ? (S.current.step === "review" ? o : "rest") : ORDER[i - 1];
     if (!n) { location.href = "/dashboard"; return; }
     if (n === "intro") { stop(); setCam("off"); enter("intro"); return; }
     if (cam === "off") { startCam(n); return; }
-    delete S.current.samples[n as Id]; if (n === "rest") S.current.neutral = null; if (n === "right") S.current.rightKey = null;
+    delete S.current.samples[n as Id]; if (n === "rest") S.current.neutral = null; if (n === "right" && !S.current.one) S.current.rightKey = null;
     enter(n);
   }
   async function startCam(goTo: Step = "align") {
@@ -97,8 +102,8 @@ export default function Calibrate() {
     }
     for (const [d, k] of [["jump", "smile"], ["fly", "brow"], ["duck", "frown"]] as [string, SK][]) { const s = sm[k === "smile" ? "smile" : k === "brow" ? "brow" : "frown"]; if (s?.length) dash[d] = mv(s, k); }
     if (sm.frown?.length) status.frown = dash.duck.detectable ? "ok" : "weak"; else status.frown = "skipped";
-    let rk: SK | null = null;
-    if (sm.right?.length) { const a = mv(sm.right, "sideA"), b = mv(sm.right, "sideB"), win = a.range / MINSK.sideA >= b.range / MINSK.sideB ? a : b; rk = win.key; dash.right = win; status.right = win.detectable ? "ok" : "weak"; } else status.right = "skipped";
+    let rk: SK | null = S.current.lockRight;
+    if (sm.right?.length) { const lk = S.current.lockRight, a = mv(sm.right, "sideA"), b = mv(sm.right, "sideB"), win = lk ? mv(sm.right, lk) : a.range / MINSK.sideA >= b.range / MINSK.sideB ? a : b; rk = win.key; dash.right = win; status.right = win.detectable ? "ok" : "weak"; } else status.right = "skipped";
     if (sm.left?.length && rk) { const w = mv(sm.left, "sideA", rk === "sideA" ? "sideB" : "sideA"); dash.left = w; status.left = w.detectable ? "ok" : "weak"; } else status.left = "skipped";
     const neutral: Record<string, { mean: number; std: number }> = {}; for (const k of CAL_KEYS) neutral[k as string] = nu.raw[k as string];
     return { flight, dash, neutral, status };
@@ -128,7 +133,7 @@ export default function Calibrate() {
       if (r.step === "align") { r.progress = r.locked ? Math.min(1, (now - r.alignedSince - 700) / 1300) : 0; hint = r.locked ? "Locked in" : hint; if (r.locked && now - r.alignedSince > 2000) { buzz(60); enter("rest"); } }
       else if (r.step === "rest" || (MOVES as string[]).includes(r.step)) {
         const isRest = r.step === "rest", id = r.step as Id, BRIEF = 3500, HOLD = 3000;
-        if (r.phase === "flash") { hint = isRest ? "Baseline saved" : "Got it"; r.progress = 1; if (now > r.flashUntil) { if (isRest) enter("smile"); else enter(r.redo ? "review" : ORDER[ORDER.indexOf(r.step) + 1]); } }
+        if (r.phase === "flash") { hint = isRest ? "Baseline saved" : "Got it"; r.progress = 1; if (now > r.flashUntil) { if (isRest) enter(S.current.one ?? "smile"); else enter(r.redo ? "review" : ORDER[ORDER.indexOf(r.step) + 1]); } }
         else if (!rough || !good) {
           if (!r.lostAt) r.lostAt = now;
           if ((r.phase === "count" || r.phase === "hold") && now - r.lostAt > 500) { r.phase = "brief"; r.phaseStart = now; r.buf = []; }
@@ -148,7 +153,7 @@ export default function Calibrate() {
                   r.neutral = nu; r.phase = "flash"; r.flashUntil = now + 1100; buzz(100);
                 } else { r.fails++; r.phase = "brief"; r.phaseStart = now; }
               } else if (r.neutral) {
-                const nu = r.neutral, cands: SK[] = id === "right" ? ["sideA", "sideB"] : id === "left" ? (r.rightKey ? [r.rightKey === "sideA" ? "sideB" : "sideA"] : ["sideA", "sideB"]) : [id as SK];
+                const nu = r.neutral, rkey = r.rightKey ?? r.lockRight, cands: SK[] = id === "right" ? (r.lockRight ? [r.lockRight] : ["sideA", "sideB"]) : id === "left" ? (rkey ? [rkey === "sideA" ? "sideB" : "sideA"] : ["sideA", "sideB"]) : [id as SK];
                 let bk = cands[0], br = -9;
                 for (const k of cands) { const a = r.buf.map(q => sig(q)[k]), n = nu.sk[k], ratio = (topMean(a) - n.mean) / Math.max(3 * n.std, MINSK[k]); if (ratio > br) { br = ratio; bk = k; } }
                 if (br > 1) { r.samples[id] = r.buf; if (id === "right") r.rightKey = bk; r.phase = "flash"; r.flashUntil = now + 1200; buzz(110); }
@@ -170,17 +175,37 @@ export default function Calibrate() {
   async function save() {
     if (!built) return; setSaving(true); setErr(null);
     const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) { location.href = "/"; return; }
-    const e1 = (await sb.from("calibration_profiles").insert({ user_id: user.id, summary: { version: 2, neutral: built.neutral, moves: built.flight, swapLR: false, note: "Camera-derived estimates in face-size-normalised units; not clinical measurements." } })).error;
+    const fm = { ...(one ? prev?.flight : {}), ...built.flight }, dm = { ...(one ? prev?.dash : {}), ...built.dash }, nm = { ...(one ? prev?.neutral : {}), ...built.neutral };
+    const e1 = (await sb.from("calibration_profiles").insert({ user_id: user.id, summary: { version: 2, neutral: nm, moves: fm, swapLR: false, note: "Camera-derived estimates in face-size-normalised units; not clinical measurements." } })).error;
     if (e1) { setSaving(false); setErr(`Couldn’t save: ${e1.message}`); return; }
-    const e2 = (await sb.from("dash_calibration").upsert({ user_id: user.id, summary: { version: 1, moves: built.dash, note: "Camera-derived estimates; not clinical measurements." }, updated_at: new Date().toISOString() }, { onConflict: "user_id" })).error;
+    const e2 = (await sb.from("dash_calibration").upsert({ user_id: user.id, summary: { version: 1, moves: dm, note: "Camera-derived estimates; not clinical measurements." }, updated_at: new Date().toISOString() }, { onConflict: "user_id" })).error;
     setSaving(false);
     if (e2) { setErr(`Your main calibration saved, but Mirror Dash’s didn’t: ${e2.message}. (Run the 0007 database step in Supabase.)`); return; }
     buzz([100, 80, 100]); setSaved(true); setTimeout(() => { location.href = nextUrl(); }, 900);
   }
 
   const idx = ORDER.indexOf(step), total = ORDER.length - 2; const isMove = (MOVES as string[]).includes(step); const c = isMove ? COPY[step as Id] : null;
-  const dots = <div className="flex gap-1" role="progressbar" aria-valuemin={1} aria-valuemax={total} aria-valuenow={Math.min(total, Math.max(1, idx))} aria-label={`Step ${Math.max(1, idx)} of ${total}`}>{ORDER.slice(1, -1).map((s, n) => <div key={s} className={`h-1 flex-1 rounded-full ${n < idx ? "bg-teal" : "bg-navy/15"}`} />)}</div>;
+  const seq: Step[] = one ? ["align", "rest", one] : ORDER.slice(1, -1), sidx = step === "review" ? seq.length : seq.indexOf(step) + 1, stotal = seq.length;
+  const dots = <div className="flex gap-1" role="progressbar" aria-valuemin={1} aria-valuemax={stotal} aria-valuenow={Math.min(stotal, Math.max(1, sidx))} aria-label={`Step ${Math.max(1, sidx)} of ${stotal}`}>{seq.map((s, n) => <div key={s} className={`h-1 flex-1 rounded-full ${n < sidx ? "bg-teal" : "bg-navy/15"}`} />)}</div>;
   const videoEl = <video ref={video} playsInline muted className="pointer-events-none fixed left-0 top-0 h-1 w-1 opacity-[0.02]" aria-hidden />;
+
+  if (step === "intro" && prev === undefined && !first) return <main className="min-h-dvh" />;
+  if (step === "intro" && !first && prev) {
+    const ok = (m: Id) => { const d = m === "frown" ? prev.dash.duck : m === "right" ? prev.dash.right : m === "left" ? prev.dash.left : m === "pucker" || m === "close" ? prev.flight[m] : prev.flight[m] ?? prev.dash.jump; return d ? (d.detectable ? "ready" : "weak") : "none"; };
+    const choose = (m: Id) => { const r = S.current; r.one = m; r.redo = true; r.lockRight = m === "right" ? (prev.dash.left ? prev.dash.right?.key ?? null : null) : m === "left" ? prev.dash.right?.key ?? null : null; setOne(m); startCam("align"); };
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))]">{videoEl}
+        <button className="self-start text-sm text-navy/60" onClick={() => (location.href = nextUrl())} aria-label="Back">← Back</button>
+        <h1 className="mt-5 font-display text-4xl">Recalibrate</h1>
+        <p className="mt-1 text-navy/60">Pick one movement</p>
+        <ul className="mt-5 grid gap-2">{MOVES.map(m => { const s = ok(m), off = m === "left" && !prev.dash.right; return <li key={m}><button disabled={cam === "loading" || off} onClick={() => choose(m)} className="flex w-full items-center gap-3 rounded-2xl bg-paper p-3 text-left shadow-soft transition active:scale-[.99] disabled:opacity-40">
+          <Guide id={m} size={44} /><span className="flex-1"><b>{COPY[m].title}</b><br /><span className="text-xs text-navy/60">{off ? "Do pucker right first" : COPY[m].games}</span></span>
+          <span className={`rounded-full px-3 py-1 text-xs ${s === "ready" ? "bg-sage/40" : "bg-gold/30"}`}>{s === "ready" ? "Ready" : s === "weak" ? "Weak" : "Not set"}</span></button></li>; })}</ul>
+        {err && <p role="alert" className="mt-3 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
+        <div className="mt-auto pt-6"><button className="btn-quiet w-full" disabled={cam === "loading"} onClick={() => { S.current.one = null; S.current.lockRight = null; setOne(null); startCam("align"); }}>{cam === "loading" ? "Starting camera…" : "Recalibrate everything"}</button>
+          <p className="mt-3 text-center text-xs text-navy/50">Glasses off · good light · eye level</p></div>
+      </main>);
+  }
 
   if (step === "intro") return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))]">{videoEl}
@@ -208,6 +233,18 @@ export default function Calibrate() {
   if (step === "review") {
     const b = built; const st = (m: Id) => b?.status[m] ?? "skipped";
     const flightOk = (["smile", "brow", "pucker", "close"] as Id[]).some(m => st(m) === "ok"), dashOk = (["smile", "brow", "frown", "right", "left"] as Id[]).every(m => st(m) === "ok");
+    if (one) { const good = st(one) === "ok"; return (
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))]">{videoEl}
+        {dots}<h1 className="mt-5 font-display text-3xl">{COPY[one].title}</h1>
+        <div className="mt-6 flex flex-col items-center rounded-3xl bg-paper p-8 text-center shadow-soft"><Guide id={one} size={96} />
+          <span className={`mt-4 rounded-full px-4 py-1.5 text-sm ${good ? "bg-sage/40" : "bg-gold/30"}`}>{good ? "Ready" : st(one) === "weak" ? "Not detected" : "Skipped"}</span>
+          {!good && <p className="mt-3 text-sm text-navy/70">Try a little more this time.</p>}</div>
+        {err && <p role="alert" className="mt-3 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
+        <div className="mt-auto grid gap-3 pt-6">
+          {good ? <button className="btn-primary min-h-[60px] w-full text-lg" disabled={saving || saved} onClick={save}>{saved ? "Saved ✓" : saving ? "Saving…" : "Save"}</button>
+            : <button className="btn-primary min-h-[60px] w-full text-lg" onClick={() => { S.current.redo = true; startCam(one); }}>Try again</button>}
+          <button className="btn-quiet w-full" disabled={saving} onClick={() => { stop(); location.href = location.pathname + location.search; }}>Pick another</button></div>
+      </main>); }
     return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))]">{videoEl}
         {dots}<h1 className="mt-5 font-display text-3xl">All set?</h1>
@@ -228,7 +265,7 @@ export default function Calibrate() {
       <div className="relative mt-3 overflow-hidden rounded-2xl border border-sage/40 bg-black shadow-soft" style={{ aspectRatio: `${CW} / ${CH}` }}>
         <canvas ref={cv} className="absolute inset-0 h-full w-full" aria-label="Your camera preview (mirrored) with a head-position outline" />
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3 text-white">
-          <span className="rounded bg-[#0f1038]/70 px-2.5 py-1 font-mono text-[11px] uppercase tracking-[.2em] text-[#8fd0ff] backdrop-blur">{step === "align" ? "Align" : step === "rest" ? "Baseline" : `Move ${Math.max(1, idx - 2)}/${MOVES.length}`}</span>
+          <span className="rounded bg-[#0f1038]/70 px-2.5 py-1 font-mono text-[11px] uppercase tracking-[.2em] text-[#8fd0ff] backdrop-blur">{step === "align" ? "Align" : step === "rest" ? "Baseline" : one ? "Recalibrate" : `Move ${Math.max(1, idx - 2)}/${MOVES.length}`}</span>
           {(isMove || step === "rest") && <span className="rounded-lg bg-[#0f1038]/70 p-1.5 backdrop-blur"><Guide id={isMove ? (step as Id) : "rest"} size={58} /></span>}
         </div>
         <div className="pointer-events-none absolute inset-x-0 top-[34%] flex justify-center px-6 text-center">
@@ -253,7 +290,7 @@ export default function Calibrate() {
         {(isMove || step === "rest") && hud.phase === "brief" && <button className="btn-primary min-h-[60px] w-full text-lg" onClick={() => { S.current.skipBrief = true; }}>I’m ready</button>}
         <div className="flex items-center gap-3">
           <button className="btn-quiet" onClick={() => goBack()}>Back</button>
-          {isMove && <button className={`btn-quiet flex-1 ${hud.skipHint ? "!border-teal" : ""}`} onClick={() => enter(S.current.redo ? "review" : ORDER[ORDER.indexOf(step) + 1])}>Skip this one</button>}
+          {isMove && !one && <button className={`btn-quiet flex-1 ${hud.skipHint ? "!border-teal" : ""}`} onClick={() => enter(S.current.redo ? "review" : ORDER[ORDER.indexOf(step) + 1])}>Skip this one</button>}
         </div>
       </div>
     </main>);
