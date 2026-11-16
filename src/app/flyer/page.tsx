@@ -8,7 +8,7 @@ type Move = { threshold: number; range: number; detectable: boolean; nm: number 
 const KEYS = ["smile", "brow", "pucker", "close"] as const;
 type K = typeof KEYS[number];
 const EXPR: Record<K, { name: string; cue: string; tip: string }> = {
-  smile: { name: "Gentle smile", cue: "Smile softly", tip: "Like greeting a friend. Never force it." },
+  smile: { name: "Smile", cue: "Close-mouth smile or smile with teeth", tip: "Either style works. Never force it." },
   brow: { name: "Eyebrow raise", cue: "Lift your eyebrows", tip: "Raise them gently, as if mildly surprised." },
   pucker: { name: "Lip pucker", cue: "Round your lips", tip: "Gently purse them, like saying “ooo”." },
   close: { name: "Gentle eye closure", cue: "Close your eyes softly", tip: "Soft, like resting. No squeezing. The bird flies by itself while you hold it." },
@@ -534,6 +534,7 @@ export default function Flight() {
           {!st.auto && <div className="mt-4 grid gap-4">
             <label className="text-sm">Sensitivity<select className="field mt-1" value={st.gain} onChange={e => update({ gain: +e.target.value })}>{GAINS.map((v, i) => <option key={v} value={v}>{i + 1} of 5{i === 2 ? " (recommended)" : i === 0 ? " (your exact target)" : i === 4 ? " (tiny movements count)" : ""}</option>)}</select></label>
             <label className="text-sm">Gap size<select className="field mt-1" value={st.gap} onChange={e => update({ gap: +e.target.value })}><option value={250}>Wide</option><option value={290}>Extra wide (recommended)</option><option value={330}>Huge</option></select></label></div>}
+          <button className="btn-quiet mt-3 w-full" onClick={() => openCalibrate("settings")}>Recalibrate</button>
           <button className="btn-primary mt-3 w-full" onClick={() => setView("hub")}>Done</button></Page>);
     }
 
