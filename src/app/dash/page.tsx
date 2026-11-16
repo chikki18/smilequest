@@ -42,7 +42,7 @@ function saveSettings(s: Settings) { try { localStorage.setItem(SKEY, JSON.strin
 const W = 360, HZ = 150, LANE = 100, D0 = 10, TOPBAR = 64, BOTBAR = 112;
 const sOf = (d: number) => 1 / (1 + d / D0);
 type Kind = "hurdle" | "bar" | "wall" | "full";
-type Row = { z: number; kind: Kind; lanes: number[]; zone: boolean; threat: boolean | null; hit: boolean; done: boolean; hold?: boolean };
+type Row = { z: number; kind: Kind; lanes: number[]; zone: boolean; threat: boolean | null; hit: boolean; done: boolean; hold?: boolean; free?: boolean };
 type Coin = { z: number; lane: number; cy: number; got: boolean };
 type G = {
   stage: "ready" | "play" | "done"; readyLeft: number; t: number; dist: number; lane: number; lanePos: number; cd: number; jumpT: number; crouchT: number; jh: number; act: M[]; jet: number; fuel: number;
@@ -259,7 +259,7 @@ function Coin({ size = 24 }: { size?: number }) { return <svg width={size} heigh
 
 type Prof = { total: number };
 type GameRow = { id: string; played_at: string; duration_seconds: number; points: number; distance: number; coins: number; cleared: number; stumbles: number; best_streak: number; top_speed: number | null; completed: boolean; per_move: any };
-type Result = { points: number; distance: number; coins: number; cleared: number; stumbles: number; bestStreak: number; topSpeed: number; seconds: number; completed: boolean; caught?: boolean; counts: Record<M, number>; saved: boolean };
+type Result = { points: number; distance: number; coins: number; cleared: number; stumbles: number; bestStreak: number; topSpeed: number; seconds: number; completed: boolean; caught?: boolean; counts: Record<M, number>; acc: Record<string, { faced: number; cleared: number }>; saved: boolean };
 
 function Page({ children }: { children?: any }) { return <main className="mx-auto max-w-md px-6 pb-12 pt-[max(2rem,env(safe-area-inset-top))]">{children}</main>; }
 
@@ -377,11 +377,11 @@ export default function Dash() {
   function finishTutorial() { stop(); setMsg("Tutorial complete. You’re ready to run."); setView("hub"); }
   async function finish(completed: boolean, caught = false) {
     const s = g.current; stop();
-    const r: Result = { points: s.points, distance: Math.round(s.dist), coins: s.coinsGot, cleared: s.cleared, stumbles: s.stumbles, bestStreak: s.best, topSpeed: Math.round(s.top * 10) / 10, seconds: Math.round(s.t), completed, caught, counts: { ...s.counts }, saved: false };
+    const r: Result = { points: s.points, distance: Math.round(s.dist), coins: s.coinsGot, cleared: s.cleared, stumbles: s.stumbles, bestStreak: s.best, topSpeed: Math.round(s.top * 10) / 10, seconds: Math.round(s.t), completed, caught, counts: { ...s.counts }, acc: Object.fromEntries(["hurdle", "bar", "wall", "full"].map(k => [k, { cleared: s.clearedBy[k] ?? 0, faced: (s.clearedBy[k] ?? 0) + (s.stumbledBy[k] ?? 0) }])), saved: false };
     setResult(r); setView("results");
     try {
       const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) return;
-      const { error } = await sb.from("dash_games").insert({ user_id: user.id, duration_seconds: r.seconds, points: r.points, distance: r.distance, coins: r.coins, cleared: r.cleared, stumbles: r.stumbles, best_streak: r.bestStreak, top_speed: r.topSpeed, completed, per_move: { caught, counts: s.counts, clearedBy: s.clearedBy, stumbledBy: s.stumbledBy }, settings: { len: cfg.current.len, start: cfg.current.start, ramp: cfg.current.ramp } });
+      const { error } = await sb.from("dash_games").insert({ user_id: user.id, duration_seconds: r.seconds, points: r.points, distance: r.distance, coins: r.coins, cleared: r.cleared, stumbles: r.stumbles, best_streak: r.bestStreak, top_speed: r.topSpeed, completed, per_move: { caught, accuracy: r.acc, counts: s.counts, clearedBy: s.clearedBy, stumbledBy: s.stumbledBy }, settings: { len: cfg.current.len, start: cfg.current.start, ramp: cfg.current.ramp } });
       if (error) { setMsg(`This run couldn’t be saved: ${error.message}`); return; }
       setResult(x => x && { ...x, saved: true });
     } catch (e: any) { setMsg(`This run couldn’t be saved: ${e?.message ?? e}`); }
@@ -440,11 +440,12 @@ export default function Dash() {
         const dd = r.z - s.dist;
         if (r.threat == null && dd < 38) r.threat = r.lanes.includes(s.lane);
         if (!r.zone && dd < 1.2 && dd > -1.2) r.zone = true;
+        if (dd > -1 && dd < .9 && s.invuln > 0) r.free = true;
         if (r.zone && !r.hit && dd > -1 && dd < .9 && s.invuln <= 0 && r.lanes.some(l => Math.abs(s.lanePos - l) < .55)) {
           const hit = r.kind === "hurdle" ? h < .5 : r.kind === "bar" ? !crouch && s.jet < .8 : s.jet < .8;
           if (hit) { r.hit = true; s.mul = .6; s.streak = 0; if (s.tut >= 0) { s.invuln = .8; s.tutHit = true; if (cfg.current.haptics) buzz(60); } else { s.invuln = 1.8; { const gap = base * 1.4; for (const q of s.rows) if (q !== r && q.z - s.dist > 2) q.z += gap; for (const c2 of s.coins) if (c2.z - s.dist > 2) c2.z += gap; s.spawnZ += gap; } s.stumbles++; s.stumbledBy[r.kind] = (s.stumbledBy[r.kind] ?? 0) + 1; s.bearT = 2.8; if (s.stumbles >= 3) s.caught = 1.2; if (cfg.current.haptics) buzz(s.stumbles >= 3 ? [120, 60, 200] : 90); } }
         }
-        if (!r.done && dd < -1.2) { r.done = true; if (!r.hit && r.threat) { s.cleared++; s.points += 10; s.streak++; s.best = Math.max(s.best, s.streak); s.clearedBy[r.kind] = (s.clearedBy[r.kind] ?? 0) + 1; } }
+        if (!r.done && dd < -1.2) { r.done = true; if (!r.hit && r.threat) { s.cleared++; s.points += 10; s.streak++; s.best = Math.max(s.best, s.streak); if (!r.free) s.clearedBy[r.kind] = (s.clearedBy[r.kind] ?? 0) + 1; } }
         if (!hint && !r.done && dd > 0 && dd < 45 && r.lanes.includes(s.lane) && !r.hit) {
           if (r.kind === "hurdle") hint = r.hold ? "Keep smiling" : "Smile to jump";
           else if (r.kind === "bar") hint = r.hold ? "Keep frowning" : "Frown to duck";
@@ -600,8 +601,12 @@ export default function Dash() {
           <p className="mt-2 text-navy/70">{R.caught ? "Three stumbles and it caught up. Every run is practice." : "Nice work. Every run counts."}</p>
           <div className="mt-5 grid grid-cols-2 gap-3">{([["Points", String(R.points)], ["Distance", `${R.distance} m`], ["Coins", String(R.coins)], ["Obstacles cleared", String(R.cleared)], ["Stumbles", String(R.stumbles)], ["Top speed", `${R.topSpeed.toFixed(1)}`]] as [string, string][]).map(([k, v]) => <div key={k} className="rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-3xl">{v}</div><div className="text-xs text-navy/60">{k}</div></div>)}
             <div className="col-span-2 rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-3xl">{R.bestStreak}</div><div className="text-xs text-navy/60">Best streak (obstacles cleared in a row)</div></div></div>
-          <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">Movements made</h2>
-            <ul className="mt-3 grid gap-2">{MOVES.map(m => <li key={m} className="flex items-center gap-3 text-sm"><Rune m={m} size={30} /><span className="flex-1">{INFO[m].action}</span><b>{R.counts[m]}</b></li>)}</ul></section>
+          <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">Accuracy by movement</h2>
+            <ul className="mt-4 grid gap-4">{([["jump", "Smile", "Jump", "hurdle"], ["duck", "Frown", "Duck", "bar"], ["right", "Pucker left or right", "Change lanes", "wall"], ["fly", "Eyebrows", "Fly", "full"]] as [M, string, string, string][]).map(([m, name, act, k]) => { const a = R.acc[k], pct = a.faced > 0 ? Math.round(a.cleared / a.faced * 100) : null;
+              return <li key={m} className="flex items-center gap-3"><Rune m={m} size={30} /><div className="min-w-0 flex-1"><div className="flex items-baseline justify-between gap-2 text-sm"><span>{name} <span className="text-navy/50">· {act}</span></span><b>{pct == null ? "–" : `${pct}%`}</b></div>
+                <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-mist" role="img" aria-label={pct == null ? `${name}: not needed this run` : `${name}: ${pct} percent`}><div className="h-full rounded-full bg-teal" style={{ width: `${pct ?? 0}%` }} /></div>
+                <div className="mt-1 text-xs text-navy/60">{a.faced > 0 ? `${a.cleared} of ${a.faced} obstacles` : m === "fly" ? `Optional · used ${R.counts.fly} time${R.counts.fly === 1 ? "" : "s"}` : "None came up"}</div></div></li>; })}</ul>
+            <p className="mt-4 text-xs text-navy/60">Accuracy is the share of obstacles you handled with the right movement.</p></section>
           {!R.saved && <p role="alert" className="mt-4 rounded-2xl bg-lav/50 p-4 text-sm">{msg ?? "Saving this run…"}</p>}
           <button className="btn-primary mt-6 min-h-[60px] w-full text-lg" onClick={onPlay}>Run again</button>
           <button className="btn-quiet mt-3 w-full" onClick={openStats}>See my stats</button>
