@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { AcRecorder, acFromSaved, type AcResult } from "@/lib/commissure";
+import { CommissureCard, CommissureHistory } from "@/components/CommissureCard";
 import { createTracker, type Frame, type Vals } from "@/lib/tracking";
 import { POLICY_VERSION } from "@/lib/onboarding";
 
@@ -17,7 +19,7 @@ const INFO: Record<M, { name: string; action: string; cue: string; tip: string; 
 };
 const SHORT: Record<M, string> = { jump: "Smile\nJump", fly: "Brows\nFly", duck: "Frown\nDuck", right: "Pucker →\nRight", left: "← Pucker\nLeft" };
 type Move = { key: SK; nm: number; std: number; peak: number; range: number; detectable: boolean };
-type Cal = Record<M, Move>;
+type Cal = Partial<Record<M, Move>>;
 const MIN: Record<SK, number> = { smile: .015, brow: .015, frown: .04, sideA: .08, sideB: .08 };
 const sigs = (v: Vals): Record<SK, number> => ({ smile: v.smile, brow: v.brow, frown: v.frown, sideA: v.sideA - 0.6 * v.sideB + 0.3 * v.pucker, sideB: v.sideB - 0.6 * v.sideA + 0.3 * v.pucker });
 const SKS: SK[] = ["smile", "brow", "frown", "sideA", "sideB"];
@@ -32,10 +34,23 @@ const LENS = [60, 90, 120];
 const STARTS = [{ v: 10, n: "Slow" }, { v: 14, n: "Medium" }, { v: 18, n: "Quick" }];
 const RAMPS = [{ v: 1.5, n: "A little" }, { v: 2, n: "Steadily" }, { v: 2.6, n: "A lot" }];
 const GAINS = [1, 1.3, 1.7, 2.2, 3];
-type Settings = { len: number; start: number; ramp: number; hints: boolean; haptics: boolean };
-const DEF: Settings = { len: 90, start: 14, ramp: 2, hints: true, haptics: true };
+type En = { jump: boolean; duck: boolean; fly: boolean; lanes: boolean };
+type Settings = { len: number; start: number; ramp: number; hints: boolean; haptics: boolean; level: 0 | 1 | 2 | 3; en: En };
+const ALL: En = { jump: true, duck: true, fly: true, lanes: true };
+const LEVELS: { n: 1 | 2 | 3; sub: string; en: En }[] = [
+  { n: 1, sub: "One lane · smile only", en: { jump: true, duck: false, fly: false, lanes: false } },
+  { n: 2, sub: "One lane · smile and frown", en: { jump: true, duck: true, fly: false, lanes: false } },
+  { n: 3, sub: "Three lanes · pucker right and left, smile, frown, eyebrows", en: ALL },
+];
+const needed = (en: En): M[] => { const a: M[] = []; if (en.jump) a.push("jump"); if (en.fly) a.push("fly"); if (en.duck) a.push("duck"); if (en.lanes) a.push("right", "left"); return a; };
+const enOf = (en: En, m: M) => (m === "right" || m === "left" ? en.lanes : en[m]);
+const calOk = (c: Partial<Record<M, Move>> | null, en: En) => !!c && needed(en).every(m => c[m]?.detectable);
+const levelOf = (en: En): 0 | 1 | 2 | 3 => LEVELS.find(L => (Object.keys(L.en) as (keyof En)[]).every(k => L.en[k] === en[k]))?.n ?? 0;
+const moveText = (en: En) => { const a: string[] = []; if (en.jump) a.push("smile to jump"); if (en.fly) a.push("raise your eyebrows to fly"); if (en.duck) a.push("frown to duck"); if (en.lanes) a.push("pucker left or right to change lanes"); return a.length > 1 ? a.slice(0, -1).join(", ") + (a.length > 2 ? "," : "") + " and " + a[a.length - 1] : a[0]; };
+const levelLabel = (st: Settings) => (st.level ? `Level ${st.level} · ${LEVELS[st.level - 1].sub}` : "Your own mix");
+const DEF: Settings = { len: 90, start: 14, ramp: 2, hints: true, haptics: true, level: 3, en: ALL };
 const SKEY = "smilequest.dash.settings";
-function loadSettings(): Settings { try { const j = JSON.parse(localStorage.getItem(SKEY) || "null"); if (j) return { ...DEF, ...j, len: LENS.includes(j.len) ? j.len : DEF.len }; } catch { /* ignore */ } return DEF; }
+function loadSettings(): Settings { try { const j = JSON.parse(localStorage.getItem(SKEY) || "null"); if (j) { const en = { ...ALL, ...(j.en ?? {}) }; return { ...DEF, ...j, en: needed(en).length ? en : ALL, len: LENS.includes(j.len) ? j.len : DEF.len }; } } catch { /* ignore */ } return DEF; }
 function saveSettings(s: Settings) { try { localStorage.setItem(SKEY, JSON.stringify(s)); } catch { /* ignore */ } }
 
 // ---------- world ----------
@@ -49,10 +64,11 @@ type G = {
   on: Record<M, boolean>; lev: Record<M, number>; rows: Row[]; coins: Coin[]; spawnZ: number; speed: number; mul: number; invuln: number; coinsGot: number; points: number;
   streak: number; best: number; cleared: number; stumbles: number; top: number; counts: Record<M, number>; clearedBy: Record<string, number>; stumbledBy: Record<string, number>;
   lostSince: number | null; adjust: boolean; manual: boolean; wh: number; py: number; hint: string; run: number; pend: Record<M, number>;
-  tut: number; tutHit: boolean; tutWait: number; tutFlash: string; hold: number; flyLock: number; caught: number; bearY: number; bearT: number;
+  en: En; rec: AcRecorder; tutSteps: TutStep[]; tut: number; tutHit: boolean; tutWait: number; tutFlash: string; hold: number; flyLock: number; caught: number; bearY: number; bearT: number;
 };
 const z5 = () => ({ jump: 0, fly: 0, duck: 0, right: 0, left: 0 });
-const fresh = (wh: number): G => ({
+const fresh = (wh: number, en: En = ALL, base: ReturnType<typeof acFromSaved> = null): G => ({
+  en, rec: new AcRecorder(base), tutSteps: tutSteps(en),
   stage: "ready", readyLeft: .25, t: 0, dist: 0, lane: 1, lanePos: 1, cd: 0, jumpT: 0, crouchT: 0, jh: 0, act: [], jet: 0, fuel: 1,
   on: { jump: false, fly: false, duck: false, right: false, left: false }, lev: z5(), rows: [], coins: [], spawnZ: 60, speed: 0, mul: 1, invuln: 0, coinsGot: 0, points: 0,
   streak: 0, best: 0, cleared: 0, stumbles: 0, top: 0, counts: z5(), clearedBy: {}, stumbledBy: {}, lostSince: null, adjust: false, manual: false, wh, py: wh - BOTBAR - 40, hint: "", run: 0, pend: z5(),
@@ -60,42 +76,48 @@ const fresh = (wh: number): G => ({
 });
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 function spawnRow(s: G, len: number) {
-  const p = clamp(s.t / len, 0, 1);
-  if (s.t > 8 && Math.random() < (p > .4 ? .3 : .2)) {
-    const kind: Kind = Math.random() < .6 ? "hurdle" : "bar", n = 3 + (Math.random() < .5 ? 1 : 0), l = Math.floor(Math.random() * 3);
-    for (let i = 0; i < n; i++) { const z = s.spawnZ + i * 5; s.rows.push({ z, kind, lanes: [l], zone: false, threat: null, hit: false, done: false, hold: true }); if (i < n - 1) s.coins.push({ z: z + 2.5, lane: l, cy: kind === "hurdle" ? 1 : 0, got: false }); }
+  const p = clamp(s.t / len, 0, 1), en = s.en, one = !en.lanes, wide = [0, 1, 2];
+  const ck: Kind[] = []; if (en.jump) ck.push("hurdle"); if (en.duck) ck.push("bar");
+  if (ck.length && s.t > 8 && Math.random() < (p > .4 ? .3 : .2)) {
+    const kind = ck[Math.floor(Math.random() * ck.length)], n = 3 + (Math.random() < .5 ? 1 : 0), l = one ? 1 : Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) { const z = s.spawnZ + i * 5; s.rows.push({ z, kind, lanes: one ? wide : [l], zone: false, threat: null, hit: false, done: false, hold: true }); if (i < n - 1) s.coins.push({ z: z + 2.5, lane: l, cy: kind === "hurdle" ? 1 : 0, got: false }); }
     s.spawnZ += (n - 1) * 5 + Math.max(24, 36 - 12 * p) + rnd(0, 6); return;
   }
-  const pool: Kind[] = ["hurdle"]; if (s.t > 6) pool.push("wall"); if (s.t > 12) pool.push("bar", "hurdle"); if (s.t > 20) pool.push("wall");
+  const pool: Kind[] = [], add = (k: Kind, after: number, w = 1) => { if (s.t >= after) for (let i = 0; i < w; i++) pool.push(k); };
+  const solo = !en.jump && !en.duck;
+  if (en.jump) add("hurdle", 0, 2); if (en.duck) add("bar", en.jump ? 8 : 0, en.jump ? 1 : 2); if (en.lanes || en.fly) add("wall", solo ? 0 : 6, 1);
+  if (!pool.length) pool.push(en.jump ? "hurdle" : en.duck ? "bar" : "wall");
   const kind = pool[Math.floor(Math.random() * pool.length)];
   const all = [0, 1, 2].sort(() => Math.random() - .5);
   const n = kind === "wall" ? 1 + (p > .35 && Math.random() < .4 ? 1 : 0) : 1 + (p > .3 && Math.random() < .5 ? 1 : 0);
-  const lanes = all.slice(0, Math.min(2, n)).sort();
+  const lanes = one ? wide : all.slice(0, Math.min(2, n)).sort(), cl = one ? 1 : lanes[0];
   s.rows.push({ z: s.spawnZ, kind, lanes, zone: false, threat: null, hit: false, done: false });
   const free = [0, 1, 2].filter(l => !lanes.includes(l));
-  if (kind === "hurdle") { const l = lanes[0]; for (const dz of [-4, 0, 4]) s.coins.push({ z: s.spawnZ + dz, lane: l, cy: 1, got: false }); }
-  else if (kind === "bar") { for (const dz of [-3, 0, 3]) s.coins.push({ z: s.spawnZ + dz, lane: lanes[0], cy: 0, got: false }); }
-  else if (kind === "wall") { for (const dz of [-4, 0, 4]) s.coins.push({ z: s.spawnZ + dz, lane: free[0], cy: 0, got: false }); if (lanes.length === 1) for (const dz of [-3, 0, 3]) s.coins.push({ z: s.spawnZ + dz, lane: lanes[0], cy: 1, got: false }); }
-  else if (kind === "full") { for (const dz of [-8, -4, 0, 4, 8]) s.coins.push({ z: s.spawnZ + dz, lane: 1, cy: 1, got: false }); }
+  if (kind === "hurdle") { for (const dz of [-4, 0, 4]) s.coins.push({ z: s.spawnZ + dz, lane: cl, cy: 1, got: false }); }
+  else if (kind === "bar") { for (const dz of [-3, 0, 3]) s.coins.push({ z: s.spawnZ + dz, lane: cl, cy: 0, got: false }); }
+  else if (kind === "wall") { if (free.length) for (const dz of [-4, 0, 4]) s.coins.push({ z: s.spawnZ + dz, lane: free[0], cy: 0, got: false }); if (en.fly && (lanes.length === 1 || one)) for (const dz of [-3, 0, 3]) s.coins.push({ z: s.spawnZ + dz, lane: cl, cy: 1, got: false }); }
   s.spawnZ += Math.max(22, 36 - 12 * p) + rnd(0, 6);
 }
 
-const TUT: { kind: Kind; n: number; text: string }[] = [
-  { kind: "hurdle", n: 1, text: "Smile to jump" },
-  { kind: "bar", n: 1, text: "Frown to duck" },
-  { kind: "wall", n: 1, text: "Pucker left or right to change lanes" },
-  { kind: "full", n: 1, text: "Raise your eyebrows to fly" },
-  { kind: "hurdle", n: 3, text: "Keep smiling to stay up" },
-  { kind: "bar", n: 3, text: "Keep frowning to stay low" },
-];
+type TutStep = { kind: Kind; n: number; text: string };
+function tutSteps(en: En): TutStep[] {
+  const a: TutStep[] = [];
+  if (en.jump) a.push({ kind: "hurdle", n: 1, text: "Smile to jump" });
+  if (en.duck) a.push({ kind: "bar", n: 1, text: "Frown to duck" });
+  if (en.lanes) a.push({ kind: "wall", n: 1, text: "Pucker left or right to change lanes" });
+  if (en.fly) a.push({ kind: "full", n: 1, text: "Raise your eyebrows to fly" });
+  if (en.jump) a.push({ kind: "hurdle", n: 3, text: "Keep smiling to stay up" });
+  if (en.duck) a.push({ kind: "bar", n: 3, text: "Keep frowning to stay low" });
+  return a;
+}
 function tutSpawn(s: G, dt: number) {
   s.tutWait = Math.max(0, s.tutWait - dt);
-  if (s.tut >= TUT.length) return;
+  if (s.tut >= s.tutSteps.length) return;
   if (s.rows.some(r => !r.done)) return;
   if (s.rows.length) { s.rows = []; s.tutWait = 1.6; if (!s.tutHit) { s.tut++; s.tutFlash = "Nice!"; } else s.tutFlash = "Let’s try that again"; s.tutHit = false; return; }
   if (s.tutWait > 0) return;
-  const T = TUT[s.tut]; s.tutFlash = "";
-  for (let i = 0; i < T.n; i++) s.rows.push({ z: s.dist + 34 + i * 4, kind: T.kind, lanes: [s.lane], zone: false, threat: null, hit: false, done: false, hold: T.n > 1 });
+  const T = s.tutSteps[s.tut]; s.tutFlash = "";
+  for (let i = 0; i < T.n; i++) s.rows.push({ z: s.dist + 34 + i * 4, kind: T.kind, lanes: s.en.lanes ? [s.lane] : [0, 1, 2], zone: false, threat: null, hit: false, done: false, hold: T.n > 1 });
 }
 
 type Pal = Record<string, string>;
@@ -259,7 +281,7 @@ function Coin({ size = 24 }: { size?: number }) { return <svg width={size} heigh
 
 type Prof = { total: number };
 type GameRow = { id: string; played_at: string; duration_seconds: number; points: number; distance: number; coins: number; cleared: number; stumbles: number; best_streak: number; top_speed: number | null; completed: boolean; per_move: any };
-type Result = { points: number; distance: number; coins: number; cleared: number; stumbles: number; bestStreak: number; topSpeed: number; seconds: number; completed: boolean; caught?: boolean; counts: Record<M, number>; acc: Record<string, { faced: number; cleared: number }>; saved: boolean };
+type Result = { points: number; distance: number; coins: number; cleared: number; stumbles: number; bestStreak: number; topSpeed: number; seconds: number; completed: boolean; caught?: boolean; counts: Record<M, number>; acc: Record<string, { faced: number; cleared: number }>; ac: AcResult | null; en: En; saved: boolean };
 
 function Page({ children }: { children?: any }) { return <main className="mx-auto max-w-md px-6 pb-12 pt-[max(2rem,env(safe-area-inset-top))]">{children}</main>; }
 
@@ -267,14 +289,14 @@ export default function Dash() {
   const video = useRef<HTMLVideoElement>(null), cvRef = useRef<HTMLCanvasElement>(null), calCv = useRef<HTMLCanvasElement>(null);
   const stream = useRef<MediaStream | null>(null), tracker = useRef<Awaited<ReturnType<typeof createTracker>> | null>(null);
   const latest = useRef<Frame | null>(null), g = useRef<G>(fresh(640));
-  const cfg = useRef({ len: 90, start: 14, ramp: 2, gain: 1.3, haptics: true }), liveGain = useRef(1.3);
+  const cfg = useRef({ len: 90, start: 14, ramp: 2, gain: 1.3, haptics: true, en: ALL }), liveGain = useRef(1.3);
   const [view, setView] = useState<"loading" | "hub" | "clearance" | "ready" | "settings" | "calibrate" | "stats" | "play" | "results">("loading");
   const [cal, setCal] = useState<Cal | null>(null), calRef = useRef<Cal | null>(null); calRef.current = cal;
   const [clear, setClear] = useState(false), [agree, setAgree] = useState(false);
   const [st, setSt] = useState<Settings>(DEF), stRef = useRef(st); stRef.current = st;
   const [msg, setMsg] = useState<string | null>(null), [busy, setBusy] = useState(false), [preview, setPreview] = useState(true), [gainUi, setGainUi] = useState(1.3);
   const [box, setBox] = useState({ w: 360, h: 640 });
-  const [ui, setUi] = useState({ stage: "ready" as "ready" | "play" | "done", ready: 6, left: 90, dist: 0, coins: 0, mul: 1, adjust: false, paused: false, hint: "", lev: z5() as Record<M, number>, on: { jump: false, fly: false, duck: false, right: false, left: false } as Record<M, boolean>, stumble: false, points: 0, lives: 3, tut: -1, tutText: "" });
+  const [ui, setUi] = useState({ stage: "ready" as "ready" | "play" | "done", ready: 6, left: 90, dist: 0, coins: 0, mul: 1, adjust: false, paused: false, hint: "", lev: z5() as Record<M, number>, on: { jump: false, fly: false, duck: false, right: false, left: false } as Record<M, boolean>, stumble: false, points: 0, lives: 3, tut: -1, tutText: "", tutTotal: 0 });
   const [result, setResult] = useState<Result | null>(null), [games, setGames] = useState<GameRow[] | null>(null);
   const [calFrom, setCalFrom] = useState<"play" | "settings">("play");
   const [calStep, setCalStep] = useState(0), [calCam, setCalCam] = useState<"off" | "loading" | "on">("off");
@@ -282,14 +304,14 @@ export default function Dash() {
   const [calNeutral, setCalNeutral] = useState<Record<SK, { mean: number; std: number }> | null>(null);
   const [calMoves, setCalMoves] = useState<Partial<Record<M, Move>>>({}), [calSaving, setCalSaving] = useState(false);
   const [calQ, setCalQ] = useState<{ face: boolean; size: boolean; light: boolean } | null>(null);
-  const hasCal = !!cal; const hubCv = useRef<HTMLCanvasElement>(null); const [hubBox, setHubBox] = useState({ w: 360, h: 640 });
+  const hasCal = calOk(cal, st.en); const acBase = useRef<ReturnType<typeof acFromSaved>>(null); const hubCv = useRef<HTMLCanvasElement>(null); const [hubBox, setHubBox] = useState({ w: 360, h: 640 });
 
   useEffect(() => { (async () => {
     const sb = supabase(); const { data: { user } } = await sb.auth.getUser();
     if (!user) { location.href = "/"; return; }
     setSt(loadSettings());
     const { data: c } = await sb.from("dash_calibration").select("summary").maybeSingle();
-    const mv = c?.summary?.moves, okCal = !!mv && MOVES.every(m => mv[m]?.detectable); if (okCal) setCal(mv as Cal);
+    const mv = c?.summary?.moves, okCal = calOk(mv ?? null, loadSettings().en); if (mv) setCal(mv as Cal); acBase.current = acFromSaved(c?.summary?.ac0);
     const { data: cl } = await sb.from("consent_records").select("id").eq("kind", "exercise_clearance").eq("granted", true).limit(1);
     setClear(!!cl?.length); setView(new URLSearchParams(location.search).get("ready") === "1" && okCal ? "ready" : "hub");
   })(); return () => stop(); }, []);
@@ -368,20 +390,20 @@ export default function Dash() {
       const v = video.current!; v.srcObject = s; await v.play();
       tracker.current = await createTracker(v, f => { latest.current = f; });
       const wh = clamp(Math.round(W * innerHeight / innerWidth), 560, 800), sc = Math.min(innerWidth / W, innerHeight / wh);
-      cfg.current = { len: st.len, start: st.start, ramp: st.ramp, gain: 1.3, haptics: st.haptics }; liveGain.current = 1.3; setGainUi(1.3);
-      g.current = fresh(wh); if (tut) { g.current.tut = 0; g.current.readyLeft = .25; } setBox({ w: W * sc, h: wh * sc });
-      setUi(u => ({ ...u, stage: "ready", ready: 6, left: st.len, dist: 0, coins: 0, mul: 1, adjust: false, paused: false, hint: "", stumble: false, points: 0, lives: 3, tut: tut ? 0 : -1, tutText: "" })); setView("play");
+      cfg.current = { len: st.len, start: st.start, ramp: st.ramp, gain: 1.3, haptics: st.haptics, en: st.en }; liveGain.current = 1.3; setGainUi(1.3);
+      g.current = fresh(wh, st.en, acBase.current); if (tut) { g.current.tut = 0; g.current.readyLeft = .25; } setBox({ w: W * sc, h: wh * sc });
+      setUi(u => ({ ...u, stage: "ready", ready: 6, left: st.len, dist: 0, coins: 0, mul: 1, adjust: false, paused: false, hint: "", stumble: false, points: 0, lives: 3, tut: tut ? 0 : -1, tutText: "", tutTotal: g.current.tutSteps.length })); setView("play");
     } catch (e: any) { stop(); setMsg(e?.name === "NotAllowedError" ? "Camera access is blocked. Allow it in your browser’s site settings, then try again." : `Couldn’t start the camera: ${e?.message ?? e}`); setView("hub"); }
     setBusy(false);
   }
   function finishTutorial() { stop(); setMsg("Tutorial complete. You’re ready to run."); setView("hub"); }
   async function finish(completed: boolean, caught = false) {
     const s = g.current; stop();
-    const r: Result = { points: s.points, distance: Math.round(s.dist), coins: s.coinsGot, cleared: s.cleared, stumbles: s.stumbles, bestStreak: s.best, topSpeed: Math.round(s.top * 10) / 10, seconds: Math.round(s.t), completed, caught, counts: { ...s.counts }, acc: Object.fromEntries(["hurdle", "bar", "wall", "full"].map(k => [k, { cleared: s.clearedBy[k] ?? 0, faced: (s.clearedBy[k] ?? 0) + (s.stumbledBy[k] ?? 0) }])), saved: false };
+    const r: Result = { points: s.points, distance: Math.round(s.dist), coins: s.coinsGot, cleared: s.cleared, stumbles: s.stumbles, bestStreak: s.best, topSpeed: Math.round(s.top * 10) / 10, seconds: Math.round(s.t), completed, caught, counts: { ...s.counts }, acc: Object.fromEntries(["hurdle", "bar", "wall", "full"].map(k => [k, { cleared: s.clearedBy[k] ?? 0, faced: (s.clearedBy[k] ?? 0) + (s.stumbledBy[k] ?? 0) }])), ac: s.rec.result(), en: s.en, saved: false };
     setResult(r); setView("results");
     try {
       const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) return;
-      const { error } = await sb.from("dash_games").insert({ user_id: user.id, duration_seconds: r.seconds, points: r.points, distance: r.distance, coins: r.coins, cleared: r.cleared, stumbles: r.stumbles, best_streak: r.bestStreak, top_speed: r.topSpeed, completed, per_move: { caught, accuracy: r.acc, counts: s.counts, clearedBy: s.clearedBy, stumbledBy: s.stumbledBy }, settings: { len: cfg.current.len, start: cfg.current.start, ramp: cfg.current.ramp } });
+      const { error } = await sb.from("dash_games").insert({ user_id: user.id, duration_seconds: r.seconds, points: r.points, distance: r.distance, coins: r.coins, cleared: r.cleared, stumbles: r.stumbles, best_streak: r.bestStreak, top_speed: r.topSpeed, completed, per_move: { caught, accuracy: r.acc, ac: r.ac, level: st.level, en: s.en, counts: s.counts, clearedBy: s.clearedBy, stumbledBy: s.stumbledBy }, settings: { len: cfg.current.len, start: cfg.current.start, ramp: cfg.current.ramp } });
       if (error) { setMsg(`This run couldn’t be saved: ${error.message}`); return; }
       setResult(x => x && { ...x, saved: true });
     } catch (e: any) { setMsg(`This run couldn’t be saved: ${e?.message ?? e}`); }
@@ -408,9 +430,11 @@ export default function Dash() {
       s.lostSince = null; s.adjust = false;
       const cal = calRef.current; if (!cal) return; const sg = sigs(fr.vals), edge: Record<M, boolean> = { jump: false, fly: false, duck: false, right: false, left: false };
       for (const m of MOVES) {
-        const c = cal[m]; let l = clamp(liveGain.current * (m === "jump" ? .72 : m === "duck" ? 1.3 : 1) * (sg[c.key] - c.nm) / c.range, 0, 1); if (l < .1) l = 0;
+        const c = cal[m]; if (!c || !enOf(cfg.current.en, m)) { s.lev[m] = 0; s.on[m] = false; continue; }
+        let l = clamp(liveGain.current * (m === "jump" ? .72 : m === "duck" ? 1.3 : 1) * (sg[c.key] - c.nm) / c.range, 0, 1); if (l < .1) l = 0;
         s.lev[m] += (l - s.lev[m]) * .6; const was = s.on[m], on = was ? s.lev[m] >= (m === "jump" ? .42 : .3) : s.lev[m] >= (m === "jump" ? .6 : .5); s.on[m] = on; edge[m] = on && !was;
       }
+      if (fr.ac && s.stage === "play" && s.tut < 0) { if (s.lev.jump >= .5) s.rec.addSmile(fr.ac); else if (MOVES.every(m => s.lev[m] < .12)) s.rec.addRest(fr.ac); }
       if (s.stage === "ready") { s.readyLeft -= dt; if (s.readyLeft <= 0) { s.stage = "play"; if (cfg.current.haptics) buzz(150); } return; }
       if (s.caught > 0) { s.caught -= dt; s.dist += s.speed * Math.max(0, s.caught) / 1.2 * dt; s.bearT = 9; if (s.caught <= 0 && !finished) { finished = true; s.stage = "done"; finish(false, true); } return; }
       const { len, start, ramp } = cfg.current;
@@ -419,6 +443,7 @@ export default function Dash() {
       const base = s.tut >= 0 ? 9 : start + start * (ramp - 1) * (1 - Math.exp(-s.t / 40)) / (1 - Math.exp(-len / 40)), v = base * s.mul; s.speed = v; s.top = Math.max(s.top, base); s.dist += v * dt;
       s.cd -= dt; s.invuln = Math.max(0, s.invuln - dt); s.flyLock = Math.max(0, s.flyLock - dt); s.bearT = Math.max(0, s.bearT - dt);
       for (const m of MOVES) s.pend[m] = edge[m] ? .3 : Math.max(0, s.pend[m] - dt);
+      if (!cfg.current.en.lanes) { s.pend.right = 0; s.pend.left = 0; s.lane = 1; }
       if (s.cd <= 0 && s.pend.right > 0 && s.lane < 2) { s.lane++; s.cd = .12; s.counts.right++; s.pend.right = 0; }
       else if (s.cd <= 0 && s.pend.left > 0 && s.lane > 0) { s.lane--; s.cd = .12; s.counts.left++; s.pend.left = 0; }
       for (const m of ["jump", "duck", "fly"] as M[]) {
@@ -453,9 +478,9 @@ export default function Dash() {
           else { const free = [0, 1, 2].filter(l => !r.lanes.includes(l)).sort((a, b) => Math.abs(a - s.lane) - Math.abs(b - s.lane))[0]; hint = free == null ? "Raise your eyebrows to fly" : free > s.lane ? "Pucker to your right" : "Pucker to your left"; }
         }
       }
-      if (s.tut >= 0) hint = s.tut >= TUT.length ? "Tutorial complete" : s.tutFlash || TUT[s.tut].text;
+      if (s.tut >= 0) hint = s.tut >= s.tutSteps.length ? "Tutorial complete" : s.tutFlash || s.tutSteps[s.tut].text;
       s.hint = hint;
-      if (s.tut >= TUT.length && s.tutWait <= 0 && !finished) { finished = true; s.stage = "done"; finishTutorial(); }
+      if (s.tut >= s.tutSteps.length && s.tutWait <= 0 && !finished) { finished = true; s.stage = "done"; finishTutorial(); }
       for (const c of s.coins) if (!c.got) { const dd = c.z - s.dist; if (dd < .9 && dd > -.9 && Math.abs(s.lanePos - c.lane) < .6 && Math.abs(h - c.cy) < .5) { c.got = true; s.coinsGot++; s.points += 5; } }
       s.points = Math.max(s.points, 0);
       if (s.rows.length > 14) s.rows = s.rows.filter(r => r.z - s.dist > -8);
@@ -464,7 +489,7 @@ export default function Dash() {
     };
     const loop = (now: number) => { raf = requestAnimationFrame(loop); const dt = Math.min(.05, (now - prev) / 1000); prev = now; step(dt, now); drawWorld(ctx, g.current, now); };
     raf = requestAnimationFrame(loop);
-    const id = setInterval(() => { const s = g.current; setUi(u => ({ ...u, stage: s.stage, ready: Math.max(0, Math.ceil(s.readyLeft)), left: Math.max(0, Math.ceil(cfg.current.len - s.t)), dist: Math.round(s.dist), coins: s.coinsGot, mul: Math.round(s.speed / cfg.current.start * 10) / 10, adjust: s.adjust, paused: s.manual, hint: s.hint, lev: { ...s.lev }, on: { ...s.on }, stumble: s.invuln > 0, points: s.points, lives: Math.max(0, 3 - s.stumbles), tut: s.tut, tutText: s.hint })); }, 100);
+    const id = setInterval(() => { const s = g.current; setUi(u => ({ ...u, stage: s.stage, ready: Math.max(0, Math.ceil(s.readyLeft)), left: Math.max(0, Math.ceil(cfg.current.len - s.t)), dist: Math.round(s.dist), coins: s.coinsGot, mul: Math.round(s.speed / cfg.current.start * 10) / 10, adjust: s.adjust, paused: s.manual, hint: s.hint, lev: { ...s.lev }, on: { ...s.on }, stumble: s.invuln > 0, points: s.points, lives: Math.max(0, 3 - s.stumbles), tut: s.tut, tutText: s.hint, tutTotal: s.tutSteps.length })); }, 100);
     return () => { cancelAnimationFrame(raf); clearInterval(id); removeEventListener("resize", fit); document.body.style.overflow = prevScroll; };
   }, [view]);
 
@@ -514,9 +539,9 @@ export default function Dash() {
 
     if (view === "ready") return (
       <Page><h1 className="font-display text-3xl">How to play</h1><Rule />
-        <p className="mt-2 text-navy/70">Your runner keeps running. Use these five movements to dodge, jump and fly. The run gets faster as it goes.</p>
-        <ul className="mt-4 grid gap-2">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded-2xl bg-paper p-3 shadow-soft"><Rune m={m} size={44} /><span className="flex-1"><b>{INFO[m].action}</b><br /><span className="text-sm text-navy/70">{INFO[m].name}</span></span></li>)}</ul>
-        <p className="mt-3 text-xs text-navy/60">Keep smiling or frowning to cross a row of obstacles. Three stumbles and the bear catches up, so go gently.</p>
+        <p className="mt-2 text-navy/70">Your runner keeps running. Use {needed(st.en).length === 1 ? "this movement" : "these movements"} to get past the obstacles. The run gets faster as it goes.</p>
+        <ul className="mt-4 grid gap-2">{MOVES.filter(m => enOf(st.en, m)).map(m => <li key={m} className="flex items-center gap-3 rounded-2xl bg-paper p-3 shadow-soft"><Rune m={m} size={44} /><span className="flex-1"><b>{INFO[m].action}</b><br /><span className="text-sm text-navy/70">{INFO[m].name}</span></span></li>)}</ul>
+        <p className="mt-3 text-xs text-navy/60">{st.en.duck ? "Keep smiling or frowning to cross a row of obstacles." : "Keep smiling to cross a row of obstacles."} Three stumbles and the bear catches up, so go gently.</p>
         {msg && <p role="alert" className="mt-3 rounded-2xl bg-lav/50 p-3 text-sm">{msg}</p>}
         <button className="btn-primary mt-5 min-h-[64px] w-full text-xl" disabled={busy} onClick={() => startGame()}>{busy ? "Starting camera…" : "I’m ready"}</button>
         <button className="btn-quiet mt-3 w-full" onClick={() => setView("hub")}>Back</button></Page>);
@@ -560,16 +585,23 @@ export default function Dash() {
 
     if (view === "settings") return (
       <Page><h1 className="font-display text-3xl">Settings</h1><Rule />
-                <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">1. Run length</h2>
+        <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">1. Level</h2>
+          <div className="mt-3 grid gap-2" role="radiogroup" aria-label="Level">{LEVELS.map(L => <button key={L.n} role="radio" aria-checked={st.level === L.n} onClick={() => update({ level: L.n, en: L.en })} className={`rounded-2xl border p-3 text-left transition ${st.level === L.n ? "border-teal bg-teal/10" : "border-navy/15"}`}><b>Level {L.n}</b><br /><span className="text-sm text-navy/70">{L.sub}</span></button>)}</div>
+          <h3 className="mt-4 text-sm font-medium">Or choose your own movements</h3>
+          <div className="mt-2 grid gap-2">{([["jump", "Smile", "Jump over low stones"], ["duck", "Frown", "Duck under bars"], ["fly", "Eyebrows", "Fly over walls"], ["lanes", "Pucker right and left", "Change lanes (turns on three lanes)"]] as [keyof En, string, string][]).map(([k, n, d]) =>
+            <label key={k} className="flex items-center justify-between gap-4 rounded-2xl bg-mist/50 p-3"><span><b>{n}</b><br /><span className="text-xs text-navy/60">{d}</span></span>
+              <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.en[k]} onChange={e => { const en = { ...st.en, [k]: e.target.checked }; if (!needed(en).length) return; update({ en, level: levelOf(en) }); }} /></label>)}</div>
+          {!calOk(cal, st.en) && <p className="mt-3 text-xs text-navy/60">Some of these movements aren’t calibrated yet. We’ll set them up when you press Play.</p>}</section>
+                <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">2. Run length</h2>
           <div className="mt-3 grid grid-cols-3 gap-2" role="radiogroup" aria-label="Run length">{LENS.map(v => <button key={v} role="radio" aria-checked={st.len === v} onClick={() => update({ len: v })} className={`min-h-[56px] ${choice(st.len === v)}`}>{v}s</button>)}</div></section>
-        <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">2. Starting speed</h2>
+        <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">3. Starting speed</h2>
           <div className="mt-3 grid grid-cols-3 gap-2" role="radiogroup" aria-label="Starting speed">{STARTS.map(x => <button key={x.v} role="radio" aria-checked={st.start === x.v} onClick={() => update({ start: x.v })} className={`min-h-[56px] ${choice(st.start === x.v)}`}>{x.n}</button>)}</div></section>
-        <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">3. How much it speeds up</h2>
+        <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">4. How much it speeds up</h2>
           <div className="mt-3 grid grid-cols-3 gap-2" role="radiogroup" aria-label="Speed increase">{RAMPS.map(x => <button key={x.v} role="radio" aria-checked={st.ramp === x.v} onClick={() => update({ ramp: x.v })} className={`min-h-[56px] ${choice(st.ramp === x.v)}`}>{x.n}</button>)}</div>
           <p className="mt-2 text-xs text-navy/60">By the end of the run you’ll be going about {st.ramp}× your starting speed.</p></section>
-        <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>4. Hints</b><br /><span className="text-sm text-navy/60">Show which movement to make for the next obstacle.</span></span>
+        <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>5. Hints</b><br /><span className="text-sm text-navy/60">Show which movement to make for the next obstacle.</span></span>
           <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.hints} onChange={e => update({ hints: e.target.checked })} aria-label="Hints" /></label>
-        <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>5. Vibration</b><br /><span className="text-sm text-navy/60">Buzz after calibration steps, at the start, and when you stumble. Works on phones that allow it.</span></span>
+        <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>6. Vibration</b><br /><span className="text-sm text-navy/60">Buzz after calibration steps, at the start, and when you stumble. Works on phones that allow it.</span></span>
           <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.haptics} onChange={e => update({ haptics: e.target.checked })} aria-label="Vibration" /></label>
         <button className="btn-quiet mt-4 w-full" onClick={() => openCalibrate("settings")}>Recalibrate</button>
         <button className="btn-primary mt-3 w-full" onClick={() => setView("hub")}>Done</button></Page>);
@@ -583,6 +615,7 @@ export default function Dash() {
         <Page><h1 className="font-display text-3xl">Your stats</h1><Rule />
           <button className="btn-primary mt-4 min-h-[60px] w-full text-lg" onClick={onPlay}>Play game</button>
           {games === null && <p className="mt-6 text-navy/60">Loading…</p>}
+          <CommissureHistory rows={gs.filter(x => x.per_move?.ac).map(x => ({ date: fmtDate(x.played_at), ac: x.per_move!.ac as AcResult }))} />
           {games && done === 0 && <p className="mt-6 rounded-2xl bg-paper p-5 text-navy/70 shadow-soft">No runs yet. Your first one will show up here.</p>}
           {done > 0 && <>
             <dl className="mt-5 grid grid-cols-2 gap-3">{tiles.map(([k, v]) => <div key={k} className="rounded-2xl bg-paper p-4 shadow-soft"><dd className="font-display text-3xl">{v}</dd><dt className="text-xs text-navy/60">{k}</dt></div>)}</dl>
@@ -599,11 +632,12 @@ export default function Dash() {
       const R = result;
       return (
         <Page><h1 className="font-display text-3xl">{R.completed ? "Run complete." : R.caught ? "The bear caught up." : "Run ended early."}</h1><Rule />
+          <CommissureCard ac={R.ac} />
           <p className="mt-2 text-navy/70">{R.caught ? "Three stumbles and it caught up. Every run is practice." : "Nice work. Every run counts."}</p>
           <div className="mt-5 grid grid-cols-2 gap-3">{([["Points", String(R.points)], ["Distance", `${R.distance} m`], ["Coins", String(R.coins)], ["Obstacles cleared", String(R.cleared)], ["Stumbles", String(R.stumbles)], ["Top speed", `${R.topSpeed.toFixed(1)}`]] as [string, string][]).map(([k, v]) => <div key={k} className="rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-3xl">{v}</div><div className="text-xs text-navy/60">{k}</div></div>)}
             <div className="col-span-2 rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-3xl">{R.bestStreak}</div><div className="text-xs text-navy/60">Best streak (obstacles cleared in a row)</div></div></div>
           <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">Accuracy by movement</h2>
-            <ul className="mt-4 grid gap-4">{([["jump", "Smile", "Jump", "hurdle"], ["duck", "Frown", "Duck", "bar"], ["right", "Pucker left or right", "Change lanes", "wall"], ["fly", "Eyebrows", "Fly", "full"]] as [M, string, string, string][]).map(([m, name, act, k]) => { const a = R.acc[k], pct = a.faced > 0 ? Math.round(a.cleared / a.faced * 100) : null, lanes = R.counts.right + R.counts.left;
+            <ul className="mt-4 grid gap-4">{([["jump", "Smile", "Jump", "hurdle"], ["duck", "Frown", "Duck", "bar"], ["right", "Pucker left or right", "Change lanes", "wall"], ["fly", "Eyebrows", "Fly", "full"]] as [M, string, string, string][]).filter(([m]) => enOf(R.en, m)).map(([m, name, act, k]) => { const a = R.acc[k], pct = a.faced > 0 ? Math.round(a.cleared / a.faced * 100) : null, lanes = R.counts.right + R.counts.left;
               if (m === "right") return <li key={m} className="flex items-center gap-3"><Rune m={m} size={30} /><div className="min-w-0 flex-1"><div className="flex items-baseline justify-between gap-2 text-sm"><span>{name} <span className="text-navy/50">· {act}</span></span><b>{lanes}</b></div><div className="mt-1 text-xs text-navy/60">{lanes === 1 ? "lane change registered" : "lane changes registered"}</div></div></li>;
               return <li key={m} className="flex items-center gap-3"><Rune m={m} size={30} /><div className="min-w-0 flex-1"><div className="flex items-baseline justify-between gap-2 text-sm"><span>{name} <span className="text-navy/50">· {act}</span></span><b>{pct == null ? "–" : `${pct}%`}</b></div>
                 <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-mist" role="img" aria-label={pct == null ? `${name}: not needed this run` : `${name}: ${pct} percent`}><div className="h-full rounded-full bg-teal" style={{ width: `${pct ?? 0}%` }} /></div>
@@ -626,15 +660,15 @@ export default function Dash() {
               <div className="dt-h text-3xl leading-none text-[#eceaff]">{ui.points}</div><div className="text-[10px] uppercase tracking-widest text-[#a9a8d6]">Score</div>
               <div className="mt-1 flex items-center justify-end gap-1.5 dt-h text-lg leading-none text-[#eceaff]"><Coin size={18} /> {ui.coins}</div>
               <div className="mt-1 text-[10px] uppercase tracking-widest text-[#a9a8d6]">{ui.dist} m · {ui.left}s</div></div>
-              : <div className="absolute right-3 top-0 rounded-2xl border border-[#8fd0ff]/40 bg-[#0f1038]/80 px-3 py-2 text-right shadow-soft" role="status"><div className="dt-h text-lg text-[#eceaff]">Tutorial</div><div className="text-[10px] uppercase tracking-widest text-[#a9a8d6]">{Math.min(ui.tut + 1, TUT.length)} of {TUT.length}</div></div>}
+              : <div className="absolute right-3 top-0 rounded-2xl border border-[#8fd0ff]/40 bg-[#0f1038]/80 px-3 py-2 text-right shadow-soft" role="status"><div className="dt-h text-lg text-[#eceaff]">Tutorial</div><div className="text-[10px] uppercase tracking-widest text-[#a9a8d6]">{Math.min(ui.tut + 1, ui.tutTotal)} of {ui.tutTotal}</div></div>}
             {ui.tut < 0 && <div className="absolute left-3 top-[64px] flex gap-1" aria-label={`${ui.lives} of 3 chances left`}>{[0, 1, 2].map(i => <svg key={i} width="22" height="20" viewBox="0 0 24 22" aria-hidden><path d="M12 21C5 15 1 11.5 1 7.2 1 4 3.4 2 6.2 2c2.3 0 4.2 1.2 5.8 3.3C13.600 3.200 15.500 2 17.800 2 20.600 2 23 4 23 7.200 23 11.500 19 15 12 21z" fill={i < ui.lives ? "#ff7a9c" : "none"} stroke="#ff7a9c" strokeOpacity={i < ui.lives ? 1 : .45} strokeWidth="1.6" /></svg>)}</div>}
           </div></div>
         {(st.hints || ui.tut >= 0) && ui.stage === "play" && ui.hint && <div className="pointer-events-none absolute inset-x-0 z-20 flex justify-center" style={{ top: "calc(env(safe-area-inset-top, 0px) + 10px)" }}><div className="w-[44%] rounded-2xl border border-[#8fd0ff]/60 bg-[#0f1038]/85 px-3 py-2 text-center dt-h text-sm leading-snug tracking-wide text-[#eceaff] shadow-soft" role="status">{ui.hint}</div></div>}
         {ui.stumble && ui.stage === "play" && ui.tut < 0 && ui.lives > 0 && <div className="pointer-events-none absolute inset-x-0 z-20 text-center text-sm font-semibold text-[#eceaff]" style={{ top: "calc(env(safe-area-inset-top, 0px) + 84px)" }}>Keep going!</div>}
         <button aria-label="Pause" onClick={() => { g.current.manual = true; }} className="absolute z-20 grid h-14 w-14 place-items-center rounded-full border border-[#8fd0ff]/40 bg-[#0f1038]/80 shadow-soft" style={{ left: 12, top: "calc(env(safe-area-inset-top, 0px) + 10px)" }}>
           <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden><rect x="4" y="3" width="5" height="16" rx="1.5" fill="#8fd0ff" /><rect x="13" y="3" width="5" height="16" rx="1.5" fill="#8fd0ff" /></svg></button>
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center pb-[max(10px,env(safe-area-inset-bottom))]"><div className="grid w-full grid-cols-5 gap-1.5 px-2" style={{ maxWidth: Math.max(box.w, 320) }}>
-          {MOVES.map(m => <div key={m} className={`flex flex-col items-center rounded border px-1 py-2 text-center text-[11px] leading-tight shadow-soft ${ui.on[m] ? "border-[#bfe6ff] bg-[#8fd0ff] text-[#0f1038]" : "border-[#8fd0ff]/30 bg-[#0f1038]/80 text-[#d6d4ff]"}`}><Rune m={m} size={30} on={ui.on[m]} tone="#8fd0ff" /><span className="mt-0.5 whitespace-pre-line">{SHORT[m]}</span>
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center pb-[max(10px,env(safe-area-inset-bottom))]"><div className="grid w-full gap-1.5 px-2" style={{ maxWidth: Math.max(box.w, 320), gridTemplateColumns: `repeat(${needed(cfg.current.en).length}, minmax(0, 1fr))` }}>
+          {MOVES.filter(m => enOf(cfg.current.en, m)).map(m => <div key={m} className={`flex flex-col items-center rounded border px-1 py-2 text-center text-[11px] leading-tight shadow-soft ${ui.on[m] ? "border-[#bfe6ff] bg-[#8fd0ff] text-[#0f1038]" : "border-[#8fd0ff]/30 bg-[#0f1038]/80 text-[#d6d4ff]"}`}><Rune m={m} size={30} on={ui.on[m]} tone="#8fd0ff" /><span className="mt-0.5 whitespace-pre-line">{SHORT[m]}</span>
             <span className="mt-1 h-1.5 w-full rounded-full bg-black/30"><span className="block h-1.5 rounded-full bg-[#ffffff]" style={{ width: `${Math.round(ui.lev[m] * 100)}%` }} /></span></div>)}</div></div>
         {ui.adjust && !ui.paused && <div className="absolute inset-0 z-40 grid place-items-center bg-[#0b0c2a]/85 p-8 text-center text-[#eceaff]" role="alert"><div><p className="dt-h text-3xl">Let’s adjust your camera</p>
           <p className="mt-3 text-base">We can’t see your face clearly. Center it and add light. The game waits, and nothing is counted against you.</p></div></div>}
@@ -658,7 +692,8 @@ export default function Dash() {
           <div>
             <p className="text-xs uppercase tracking-[.35em] text-[#8fd0ff]">For advanced practice</p>
             <h1 className="dt-h mt-2 text-5xl font-bold leading-[1.05] text-white">MIRROR<br />DASH</h1><Rule light />
-            <p className="text-[#d6d4ff]">Run the ruins. Smile to jump, raise your eyebrows to fly, frown to duck, and pucker left or right to change lanes.</p>
+            <p className="text-[#d6d4ff]">Run the ruins. {moveText(st.en)[0].toUpperCase() + moveText(st.en).slice(1)}.</p>
+            <p className="mt-2 text-xs uppercase tracking-[.2em] text-[#8fd0ff]">{levelLabel(st)}</p>
             {msg && <p role="alert" className="mt-3 rounded-2xl bg-[#3f0f7f] p-3 text-sm">{msg}</p>}
             <button className="btn-primary mt-5 min-h-[64px] w-full text-lg uppercase tracking-[.16em]" onClick={onPlay}>Play game</button>
             {!hasCal && <p className="mt-2 text-center text-xs text-[#a9a8d6]">First time? We’ll set up your camera next.</p>}
