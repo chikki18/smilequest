@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { createTracker, type Frame, type Vals } from "@/lib/tracking";
+import { meanAC, acFromSaved, type AC } from "@/lib/commissure";
 
 // ---------- what we measure ----------
 type Id = "smile" | "brow" | "frown" | "pucker" | "right" | "left" | "close";
@@ -10,7 +11,7 @@ type Step = "intro" | "align" | "rest" | Id | "review";
 const ORDER: Step[] = ["intro", "align", "rest", "smile", "brow", "frown", "pucker", "right", "left", "close", "review"];
 const MOVES: Id[] = ["smile", "brow", "frown", "pucker", "right", "left", "close"];
 const COPY: Record<Id, { title: string; cue: string; tip: string; games: string }> = {
-  smile: { title: "Smile", cue: "Close-mouth smile", tip: "Either style works. Never force it.", games: "Flight · Dash" },
+  smile: { title: "Smile", cue: "Close-mouth smile or smile with teeth", tip: "Either style works. Never force it.", games: "Flight · Dash" },
   brow: { title: "Eyebrow raise", cue: "Lift your eyebrows", tip: "Raise them gently, as if mildly surprised.", games: "Flight · Dash" },
   frown: { title: "Frown", cue: "Frown", tip: "Turn the corners of your mouth down. Keep your brows relaxed.", games: "Dash" },
   pucker: { title: "Lip pucker", cue: "Round your lips like “ooo”", tip: "Gently purse them and hold.", games: "Flight" },
@@ -52,15 +53,15 @@ export default function Calibrate() {
   const [step, setStep] = useState<Step>("intro"), [cam, setCam] = useState<"off" | "loading" | "on">("off"), [err, setErr] = useState<string | null>(null);
   const [built, setBuilt] = useState<Built | null>(null), [saving, setSaving] = useState(false), [saved, setSaved] = useState(false);
   const [hud, setHud] = useState({ aligned: false, locked: false, hint: "Looking for your face…", progress: 0, phase: "brief" as "brief" | "count" | "hold" | "flash", skipHint: false, face: false, count: 0 as number });
-  const S = useRef({ step: "intro" as Step, alignedSince: 0, lostSince: 0, locked: false, enteredAt: 0, phase: "brief" as "brief" | "count" | "hold" | "flash", phaseStart: 0, lostAt: 0, fails: 0, skipBrief: false, over: 0, holdStart: 0, weakSince: 0, buf: [] as Vals[], restBuf: [] as Vals[], restMs: 0, last: 0, flashUntil: 0, bestKey: "sideA" as SK, rightKey: null as SK | null, neutral: null as Neutral | null, redo: false, samples: {} as Partial<Record<Id, Vals[]>>, progress: 0, hint: "", face: false, aligned: false, rough: false, one: null as Id | null, lockRight: null as SK | null });
-  type Prev = { flight: Record<string, any>; dash: Record<string, any>; neutral: Record<string, any> };
+  const S = useRef({ step: "intro" as Step, alignedSince: 0, lostSince: 0, locked: false, enteredAt: 0, phase: "brief" as "brief" | "count" | "hold" | "flash", phaseStart: 0, lostAt: 0, fails: 0, skipBrief: false, over: 0, holdStart: 0, weakSince: 0, buf: [] as Vals[], restBuf: [] as Vals[], restMs: 0, last: 0, flashUntil: 0, bestKey: "sideA" as SK, rightKey: null as SK | null, neutral: null as Neutral | null, redo: false, samples: {} as Partial<Record<Id, Vals[]>>, progress: 0, hint: "", face: false, aligned: false, rough: false, one: null as Id | null, lockRight: null as SK | null, acBuf: [] as AC[], ac0: null as AC | null });
+  type Prev = { flight: Record<string, any>; dash: Record<string, any>; neutral: Record<string, any>; ac0: AC | null };
   const [prev, setPrev] = useState<Prev | null | undefined>(undefined), [one, setOne] = useState<Id | null>(null);
   const [first, setFirst] = useState(false); useEffect(() => { setFirst(new URLSearchParams(location.search).get("first") === "1"); }, []);
 
   useEffect(() => { (async () => { const { data: { user } } = await supabase().auth.getUser(); if (!user) { location.href = "/"; return; }
     const sb = supabase(); const a = await sb.from("calibration_profiles").select("summary").eq("user_id", user.id).order("created_at", { ascending: false }).limit(1).maybeSingle(); const b = await sb.from("dash_calibration").select("summary").eq("user_id", user.id).maybeSingle();
     const fl = (a.data as any)?.summary, da = (b.data as any)?.summary;
-    setPrev(fl || da ? { flight: fl?.moves ?? {}, dash: da?.moves ?? {}, neutral: fl?.neutral ?? {} } : null); })(); return () => stop(); }, []);
+    setPrev(fl || da ? { flight: fl?.moves ?? {}, dash: da?.moves ?? {}, neutral: fl?.neutral ?? {}, ac0: acFromSaved(fl?.ac0) ?? acFromSaved(da?.ac0) } : null); })(); return () => stop(); }, []);
   function stop() { tracker.current?.stop(); tracker.current = null; stream.current?.getTracks().forEach(t => t.stop()); stream.current = null; latest.current = null; }
   function nextUrl() { const n = new URLSearchParams(location.search).get("next"); return n && n.startsWith("/") && !n.startsWith("//") ? n : "/dashboard"; }
 
@@ -136,21 +137,21 @@ export default function Calibrate() {
         if (r.phase === "flash") { hint = isRest ? "Baseline saved" : "Got it"; r.progress = 1; if (now > r.flashUntil) { if (isRest) enter(S.current.one ?? "smile"); else enter(r.redo ? "review" : ORDER[ORDER.indexOf(r.step) + 1]); } }
         else if (!rough || !good) {
           if (!r.lostAt) r.lostAt = now;
-          if ((r.phase === "count" || r.phase === "hold") && now - r.lostAt > 500) { r.phase = "brief"; r.phaseStart = now; r.buf = []; }
+          if ((r.phase === "count" || r.phase === "hold") && now - r.lostAt > 500) { r.phase = "brief"; r.phaseStart = now; r.buf = []; r.acBuf = []; }
           if (r.phase === "brief") { r.phaseStart = now; r.skipBrief = false; }
           r.progress = 0; if (!face) hint = "Looking for your face…";
         } else {
           r.lostAt = 0; const el = now - r.phaseStart;
           if (r.phase === "brief") { hint = r.fails ? "Let’s try that once more" : "Press I’m ready"; r.progress = 0; if (r.skipBrief) { r.skipBrief = false; r.phase = "count"; r.phaseStart = now; } }
-          else if (r.phase === "count") { count = Math.max(1, 3 - Math.floor(el / 1000)); hint = isRest ? "Relax your face" : COPY[id].title; r.progress = 0; if (el >= 3000) { r.phase = "hold"; r.phaseStart = now; r.buf = []; buzz(40); } }
+          else if (r.phase === "count") { count = Math.max(1, 3 - Math.floor(el / 1000)); hint = isRest ? "Relax your face" : COPY[id].title; r.progress = 0; if (el >= 3000) { r.phase = "hold"; r.phaseStart = now; r.buf = []; r.acBuf = []; buzz(40); } }
           else if (r.phase === "hold") {
-            hint = isRest ? "Stay relaxed…" : "Hold it…"; r.buf.push(fr!.vals!); r.progress = Math.min(1, el / HOLD);
+            hint = isRest ? "Stay relaxed…" : "Hold it…"; r.buf.push(fr!.vals!); if (isRest && fr!.ac) r.acBuf.push(fr!.ac); r.progress = Math.min(1, el / HOLD);
             if (el >= HOLD) {
               if (isRest) {
                 if (r.buf.length > 25) {
                   const nu: Neutral = { sk: {} as any, raw: {} }; for (const k of SKS) { const a = r.buf.map(b => sig(b)[k]); nu.sk[k] = { mean: mean(a), std: sd(a) }; }
                   for (const k of CAL_KEYS) { const a = r.buf.map(b => b[k] as number); nu.raw[k as string] = { mean: mean(a), std: sd(a) }; }
-                  r.neutral = nu; r.phase = "flash"; r.flashUntil = now + 1100; buzz(100);
+                  r.neutral = nu; r.ac0 = meanAC(r.acBuf); r.phase = "flash"; r.flashUntil = now + 1100; buzz(100);
                 } else { r.fails++; r.phase = "brief"; r.phaseStart = now; }
               } else if (r.neutral) {
                 const nu = r.neutral, rkey = r.rightKey ?? r.lockRight, cands: SK[] = id === "right" ? (r.lockRight ? [r.lockRight] : ["sideA", "sideB"]) : id === "left" ? (rkey ? [rkey === "sideA" ? "sideB" : "sideA"] : ["sideA", "sideB"]) : [id as SK];
@@ -176,9 +177,10 @@ export default function Calibrate() {
     if (!built) return; setSaving(true); setErr(null);
     const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) { location.href = "/"; return; }
     const fm = { ...(one ? prev?.flight : {}), ...built.flight }, dm = { ...(one ? prev?.dash : {}), ...built.dash }, nm = { ...(one ? prev?.neutral : {}), ...built.neutral };
-    const e1 = (await sb.from("calibration_profiles").insert({ user_id: user.id, summary: { version: 2, neutral: nm, moves: fm, swapLR: false, note: "Camera-derived estimates in face-size-normalised units; not clinical measurements." } })).error;
+    const ac0 = S.current.ac0 ?? prev?.ac0 ?? null;
+    const e1 = (await sb.from("calibration_profiles").insert({ user_id: user.id, summary: { version: 2, neutral: nm, moves: fm, ac0, swapLR: false, note: "Camera-derived estimates in face-size-normalised units; not clinical measurements." } })).error;
     if (e1) { setSaving(false); setErr(`Couldn’t save: ${e1.message}`); return; }
-    const e2 = (await sb.from("dash_calibration").upsert({ user_id: user.id, summary: { version: 1, moves: dm, note: "Camera-derived estimates; not clinical measurements." }, updated_at: new Date().toISOString() }, { onConflict: "user_id" })).error;
+    const e2 = (await sb.from("dash_calibration").upsert({ user_id: user.id, summary: { version: 1, moves: dm, ac0, note: "Camera-derived estimates; not clinical measurements." }, updated_at: new Date().toISOString() }, { onConflict: "user_id" })).error;
     setSaving(false);
     if (e2) { setErr(`Your main calibration saved, but Mirror Dash’s didn’t: ${e2.message}. (Run the 0007 database step in Supabase.)`); return; }
     buzz([100, 80, 100]); setSaved(true); setTimeout(() => { location.href = nextUrl(); }, 900);
