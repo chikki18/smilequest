@@ -361,9 +361,10 @@ export default function Flight() {
   async function openStats() {
     setView("stats"); setGames(null);
     const cols = "id,played_at,mode,duration_seconds,points,accuracy,coins,misses,best_streak,gates,completed,per_expression";
-    let { data, error } = await supabase().from("flight_games").select(cols + ",commissure").order("played_at", { ascending: false }).limit(200);
-    if (error) ({ data } = await supabase().from("flight_games").select(cols).order("played_at", { ascending: false }).limit(200));
-    setGames((data as unknown as GameRow[]) ?? []);
+    const r1: any = await supabase().from("flight_games").select(cols + ",commissure").order("played_at", { ascending: false }).limit(200);
+    let rows: any = r1.data;
+    if (r1.error) { const r2: any = await supabase().from("flight_games").select(cols).order("played_at", { ascending: false }).limit(200); rows = r2.data; }
+    setGames((rows as GameRow[] | null) ?? []);
   }
 
   useEffect(() => {
