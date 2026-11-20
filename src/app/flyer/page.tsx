@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { createTracker, type Frame, type Vals } from "@/lib/tracking";
+import { AcRecorder, acFromSaved, type AcResult } from "@/lib/commissure";
+import { CommissureCard, CommissureHistory } from "@/components/CommissureCard";
 import { POLICY_VERSION } from "@/lib/onboarding";
 
 type Move = { threshold: number; range: number; detectable: boolean; nm: number };
@@ -41,9 +43,10 @@ const UNLOCKS = [{ need: 25, label: "Bird colors" }, { need: 50, label: "More co
 type Per = { k: K; valid: number; on: number; gates: number; coins: number; misses: number };
 type Pil = { x: number; c: number; gap: number; passed: boolean; hit: boolean };
 type Coin = { x: number; y: number; got: boolean };
-const fresh = (plan: K[], wh: number) => {
+const fresh = (plan: K[], wh: number, base: ReturnType<typeof acFromSaved> = null) => {
   const mid = (TOP + wh - GROUND_H) / 2;
   return {
+    rec: new AcRecorder(base),
     t: 0, scroll: 0, y: mid, vy: 0, lev: 0, active: false, flap: 0, wh, mid,
     pillars: [] as Pil[], coins: [] as Coin[], spawnX: W + 260, prev: mid,
     gates: 0, coinsGot: 0, misses: 0, streak: 0, best: 0, points: 0,
@@ -154,8 +157,8 @@ function FaceArt({ k, size }: { k: K | "rest"; size: number }) {
     </svg>);
 }
 
-type GameRow = { id: string; played_at: string; mode: string; duration_seconds: number; points: number; accuracy: number | null; coins: number; misses: number; best_streak: number; gates: number; completed: boolean; per_expression: { k: K; accuracy: number; seconds: number }[] };
-type Result = { points: number; accuracy: number; coins: number; misses: number; bestStreak: number; gates: number; seconds: number; completed: boolean; per: { k: K; accuracy: number; gates: number; coins: number; misses: number; seconds: number }[]; unlocked: string[]; saved: boolean };
+type GameRow = { id: string; played_at: string; mode: string; duration_seconds: number; points: number; accuracy: number | null; coins: number; misses: number; best_streak: number; gates: number; completed: boolean; commissure?: AcResult | null; per_expression: { k: K; accuracy: number; seconds: number }[] };
+type Result = { points: number; accuracy: number; coins: number; misses: number; bestStreak: number; gates: number; seconds: number; completed: boolean; ac?: AcResult | null; per: { k: K; accuracy: number; gates: number; coins: number; misses: number; seconds: number }[]; unlocked: string[]; saved: boolean };
 type CalMove = { peak: number; range: number; threshold: number; detectable: boolean; sideDelta: number[] | null };
 const CAL_KEYS = ["smile", "brow", "pucker", "close", "liftL", "liftR", "browL", "browR", "closeL", "closeR"] as (keyof Vals)[];
 const CAL_MIN: Record<K, number> = { smile: .015, brow: .015, pucker: .08, close: .08 };
@@ -201,7 +204,7 @@ function AccChart({ games }: { games: GameRow[] }) {
 export default function Flight() {
   const video = useRef<HTMLVideoElement>(null), cvRef = useRef<HTMLCanvasElement>(null), pvRef = useRef<HTMLCanvasElement>(null);
   const stream = useRef<MediaStream | null>(null), tracker = useRef<Awaited<ReturnType<typeof createTracker>> | null>(null);
-  const latest = useRef<Frame | null>(null), g = useRef<G>(fresh(["smile"], 640));
+  const latest = useRef<Frame | null>(null), g = useRef<G>(fresh(["smile"], 640)), acBase = useRef<ReturnType<typeof acFromSaved>>(null);
   const cfg = useRef({ secs: 20, gap: 290, pace: 75, auto: true }), liveGain = useRef(1.7);
   const [view, setView] = useState<"loading" | "hub" | "clearance" | "ready" | "settings" | "calibrate" | "stats" | "custom" | "play" | "results">("loading");
   const [cal, setCal] = useState<Partial<Record<K, Move>>>({});
@@ -230,7 +233,7 @@ export default function Flight() {
     const { data: c } = await sb.from("calibration_profiles").select("summary").order("created_at", { ascending: false }).limit(1).maybeSingle();
     const m: Partial<Record<K, Move>> = {};
     for (const k of KEYS) { const v = c?.summary?.moves?.[k]; if (v?.detectable) m[k] = { ...v, nm: v.threshold - 0.5 * v.range }; }
-    setCal(m);
+    setCal(m); acBase.current = acFromSaved(c?.summary?.ac0);
     const { data: cl } = await sb.from("consent_records").select("id").eq("kind", "exercise_clearance").eq("granted", true).limit(1);
     setClear(!!cl?.length);
     const { data: fp } = await sb.from("flyer_profiles").select("total_coins,bird_kind,color,accessory").maybeSingle();
@@ -329,7 +332,7 @@ export default function Flight() {
       tracker.current = await createTracker(v, f => { latest.current = f; });
       const wh = clamp(Math.round(W * innerHeight / innerWidth), 560, 800), sc = Math.min(innerWidth / W, innerHeight / wh);
       cfg.current = { secs: st.len / plan.length, gap: eff.gap, pace: eff.pace, auto: st.auto }; liveGain.current = eff.gain; setGainUi(eff.gain);
-      g.current = fresh(plan, wh); setBox({ w: W * sc, h: wh * sc });
+      g.current = fresh(plan, wh, acBase.current); setBox({ w: W * sc, h: wh * sc });
       setUi({ stage: "ready", si: 0, total: plan.length, ready: 6, left: Math.ceil(st.len / plan.length), adjust: false, paused: false, k: plan[0], lives: 3 }); setView("play");
     } catch (e: any) { stop(); setMsg(e?.name === "NotAllowedError" ? "Camera access is blocked. Allow it in your browser’s site settings, then try again." : `Couldn’t start the camera: ${e?.message ?? e}`); setView("hub"); }
     setBusy(false);
@@ -341,11 +344,13 @@ export default function Flight() {
     const before = P.current.total;
     const per = s.per.map(p => ({ k: p.k, accuracy: p.valid > 0 ? r1(p.on / p.valid * 100) : 0, gates: p.gates, coins: p.coins, misses: p.misses, seconds: r1(p.valid) }));
     const res: Result = { points: s.points, accuracy: acc, coins: s.coinsGot, misses: s.misses, bestStreak: s.best, gates: s.gates, seconds: s.t, completed, per, saved: true,
-      unlocked: UNLOCKS.filter(u => u.need > before && u.need <= before + s.coinsGot).map(u => u.label) };
+      ac: s.rec.result(), unlocked: UNLOCKS.filter(u => u.need > before && u.need <= before + s.coinsGot).map(u => u.label) };
     setResult(res); setView("results");
     const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); let ok = !!user;
     if (user) {
-      const { error } = await sb.from("flight_games").insert({ user_id: user.id, mode: cfg.current.auto ? "auto" : "custom", duration_seconds: Math.round(s.t), points: s.points, accuracy: acc, coins: s.coinsGot, misses: s.misses, best_streak: s.best, gates: s.gates, completed, per_expression: per });
+      const row = { user_id: user.id, mode: cfg.current.auto ? "auto" : "custom", duration_seconds: Math.round(s.t), points: s.points, accuracy: acc, coins: s.coinsGot, misses: s.misses, best_streak: s.best, gates: s.gates, completed, per_expression: per };
+      let { error } = await sb.from("flight_games").insert({ ...row, commissure: res.ac });
+      if (error && /commissure/i.test(error.message)) ({ error } = await sb.from("flight_games").insert(row));
       if (error) { ok = false; setMsg(`Couldn’t save this game: ${error.message}. (Run the 0006 database step in Supabase.)`); }
       if (s.coinsGot > 0 && !(await bank(s.coinsGot))) ok = false;
     }
@@ -355,8 +360,10 @@ export default function Flight() {
 
   async function openStats() {
     setView("stats"); setGames(null);
-    const { data } = await supabase().from("flight_games").select("id,played_at,mode,duration_seconds,points,accuracy,coins,misses,best_streak,gates,completed,per_expression").order("played_at", { ascending: false }).limit(200);
-    setGames((data as GameRow[]) ?? []);
+    const cols = "id,played_at,mode,duration_seconds,points,accuracy,coins,misses,best_streak,gates,completed,per_expression";
+    let { data, error } = await supabase().from("flight_games").select(cols + ",commissure").order("played_at", { ascending: false }).limit(200);
+    if (error) ({ data } = await supabase().from("flight_games").select(cols).order("played_at", { ascending: false }).limit(200));
+    setGames((data as unknown as GameRow[]) ?? []);
   }
 
   useEffect(() => {
@@ -383,6 +390,7 @@ export default function Flight() {
       s.lostSince = null; s.adjust = false;
       const k = s.plan[s.si], m = calRef.current[k]; if (!m) return;
       let l = clamp(liveGain.current * (k === "smile" ? .72 : 1) * (fr.vals[k] - m.nm) / m.range, 0, 1); if (l < .12) l = 0;
+      if (fr.ac && s.stage === "play") { if (k === "smile" && s.lev >= .5) s.rec.addSmile(fr.ac); else if (s.lev < .12) s.rec.addRest(fr.ac); }
       s.lev += (l - s.lev) * .55; s.flap += dt * (8 + s.lev * 12); s.active = s.active ? s.lev >= (k === "smile" ? .4 : .28) : s.lev >= (k === "smile" ? .55 : HOVER);
       if (s.stage === "play" && k === "close" && s.active !== hap.current.act) { hap.current.act = s.active; if (hapOn.current) buzz(s.active ? 40 : [30, 50, 30]); }
       const ground = s.wh - GROUND_H;
@@ -565,6 +573,7 @@ export default function Flight() {
           {games === null && <p className="mt-6 text-navy/60">Loading…</p>}
           {games && done === 0 && <p className="mt-6 rounded-2xl bg-paper p-5 text-navy/70 shadow-soft">No games yet. Your first one will show up here.</p>}
           {done > 0 && <>
+            <CommissureHistory rows={gs.filter(x => x.commissure).map(x => ({ date: fmtDate(x.played_at), ac: x.commissure as AcResult }))} />
             <dl className="mt-5 grid grid-cols-2 gap-3">{tiles.map(([k, v]) => <div key={k} className="rounded-2xl bg-paper p-4 shadow-soft"><dd className="font-display text-3xl">{v}</dd><dt className="text-xs text-navy/60">{k}</dt></div>)}</dl>
             <section className="mt-6 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">Accuracy, last {Math.min(12, done)} games</h2><p className="text-xs text-navy/60">Share of play time you held the requested movement.</p><AccChart games={gs} /></section>
             <section className="mt-4 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">Accuracy by expression</h2>
@@ -580,6 +589,7 @@ export default function Flight() {
       return (
         <Page><h1 className="font-display text-3xl">{R.completed ? "Flight complete." : "Flight over."}</h1>
           <p className="mt-2 text-navy/70">{R.completed ? "Thanks for flying. Every flight counts." : "Three bumps and the flight is over. Every flight is practice."}</p>
+          <CommissureCard ac={R.ac} />
           <div className="mt-5 grid grid-cols-2 gap-3">{([["Points", String(R.points)], ["Accuracy", `${Math.round(R.accuracy)}%`], ["Coins", String(R.coins)], ["Missed gates", String(R.misses)]] as [string, string][]).map(([k, v]) => <div key={k} className="rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-4xl">{v}</div><div className="text-xs text-navy/60">{k}</div></div>)}
             <div className="col-span-2 rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-4xl">{R.bestStreak}</div><div className="text-xs text-navy/60">Best streak (gates in a row)</div></div></div>
           <p className="mt-2 text-xs text-navy/60">A missed gate is a bump into a pillar. Three bumps end the flight.</p>
