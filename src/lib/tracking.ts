@@ -1,7 +1,8 @@
 // Reusable face tracking engine (MediaPipe Face Landmarker). Runs on-device; no video is uploaded or stored.
 export type Vals = { smile:number; brow:number; pucker:number; close:number; liftL:number; liftR:number; browL:number; browR:number; closeL:number; closeR:number; frown:number; sideA:number; sideB:number };
 export type Quality = { face:boolean; size:boolean; light:boolean; fps:number };
-export type Frame = { t:number; vals:Vals|null; q:Quality; pos?:{ x:number; y:number; s:number } };
+export type AC = { lx:number; ly:number; rx:number; ry:number };
+export type Frame = { t:number; vals:Vals|null; q:Quality; pos?:{ x:number; y:number; s:number }; ac?:AC };
 const V = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
 
@@ -20,11 +21,11 @@ export async function createTracker(video: HTMLVideoElement, onFrame: (f: Frame)
   let running = true, raf = 0, last = 0, lastVT = -1, interval = 33, swap = false, n = 0, light = 0.5;
   const times: number[] = [];
   let frames = 0, fpsT = performance.now(), fps = 0;
-  let sm: Vals | null = null;
+  let sm: Vals | null = null, acs: AC | null = null;
   const cv = document.createElement("canvas"); cv.width = 32; cv.height = 24;
   const cx = cv.getContext("2d", { willReadFrequently: true })!;
-  const emit = (vals: Vals | null, face: boolean, size: boolean, pos?: { x: number; y: number; s: number }) =>
-    onFrame({ t: Date.now(), vals, pos, q: { face, size, light: light > 0.18 && light < 0.92, fps } });
+  const emit = (vals: Vals | null, face: boolean, size: boolean, pos?: { x: number; y: number; s: number }, ac?: AC) =>
+    onFrame({ t: Date.now(), vals, pos, ac, q: { face, size, light: light > 0.18 && light < 0.92, fps } });
 
   const tick = (now: number) => {
     if (!running) return;
@@ -45,12 +46,13 @@ export async function createTracker(video: HTMLVideoElement, onFrame: (f: Frame)
       light = s / (d.length / 4) / 255;
     }
     const P = r.faceLandmarks?.[0];
-    if (!P) { sm = null; emit(null, false, false); return; }
+    if (!P) { sm = null; acs = null; emit(null, false, false); return; }
     const W = video.videoWidth, H = video.videoHeight;
     // Head-roll-corrected, face-size-normalised coordinates (units = inter-ocular distance, not millimetres)
     const a = P[33], b = P[263];
     const ex = (b.x - a.x) * W, ey = (b.y - a.y) * H, iod = Math.hypot(ex, ey), roll = Math.atan2(ey, ex);
     const c = Math.cos(-roll), s = Math.sin(-roll);
+    const X = (p: any) => ((p.x - a.x) * W * c - (p.y - a.y) * H * s) / iod - 0.5;
     const Y = (p: any) => ((p.x - a.x) * W * s + (p.y - a.y) * H * c) / iod;
     const mid = (Y(P[13]) + Y(P[14])) / 2;
     // Landmark 291/334/386 = person's anatomical LEFT; 61/105/159 = person's RIGHT (camera image is not mirrored here)
@@ -64,7 +66,9 @@ export async function createTracker(video: HTMLVideoElement, onFrame: (f: Frame)
       frown: Math.max(0, 1.6 * ((bs.mouthFrownLeft ?? 0) + (bs.mouthFrownRight ?? 0)) / 2 + 0.5 * (bs.mouthShrugLower ?? 0) + 0.3 * ((bs.mouthPressLeft ?? 0) + (bs.mouthPressRight ?? 0)) / 2 - 0.9 * ((bs.browDownLeft ?? 0) + (bs.browDownRight ?? 0)) / 2 - 0.6 * (bs.browInnerUp ?? 0) - 0.4 * ((bs.browOuterUpLeft ?? 0) + (bs.browOuterUpRight ?? 0)) / 2 - 0.6 * ((bs.mouthSmileLeft ?? 0) + (bs.mouthSmileRight ?? 0)) / 2), sideA: bs.mouthLeft ?? 0, sideB: bs.mouthRight ?? 0 };
     const size = iod / W > 0.1 && iod / W < 0.45 && P[1].x > 0.1 && P[1].x < 0.9 && P[1].y > 0.1 && P[1].y < 0.9;
     if (!sm) sm = raw; else for (const k of Object.keys(raw) as (keyof Vals)[]) sm[k] = sm[k] * 0.65 + raw[k] * 0.35; // temporal smoothing
-    emit({ ...sm }, true, size, { x: P[1].x, y: P[1].y, s: iod / W });
+    const acr: AC = { lx: X(P[291]), ly: Y(P[291]), rx: X(P[61]), ry: Y(P[61]) };
+    if (!acs) acs = acr; else { acs.lx = acs.lx * 0.5 + acr.lx * 0.5; acs.ly = acs.ly * 0.5 + acr.ly * 0.5; acs.rx = acs.rx * 0.5 + acr.rx * 0.5; acs.ry = acs.ry * 0.5 + acr.ry * 0.5; }
+    emit({ ...sm }, true, size, { x: P[1].x, y: P[1].y, s: iod / W }, { ...acs });
   };
   raf = requestAnimationFrame(tick);
   return { stop() { running = false; cancelAnimationFrame(raf); try { lm.close?.(); } catch {} }, setSwap(v: boolean) { swap = v; } };
