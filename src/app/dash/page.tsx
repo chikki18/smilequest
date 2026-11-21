@@ -35,7 +35,7 @@ const STARTS = [{ v: 10, n: "Slow" }, { v: 14, n: "Medium" }, { v: 18, n: "Quick
 const RAMPS = [{ v: 1.5, n: "A little" }, { v: 2, n: "Steadily" }, { v: 2.6, n: "A lot" }];
 const GAINS = [1, 1.3, 1.7, 2.2, 3];
 type En = { jump: boolean; duck: boolean; fly: boolean; lanes: boolean };
-type Settings = { len: number; start: number; ramp: number; hints: boolean; haptics: boolean; level: 0 | 1 | 2 | 3; en: En };
+type Settings = { len: number; start: number; ramp: number; hints: boolean; haptics: boolean; level: 0 | 1 | 2 | 3; en: En; mode: "chase" | "hearts" };
 const ALL: En = { jump: true, duck: true, fly: true, lanes: true };
 const LEVELS: { n: 1 | 2 | 3; sub: string; en: En }[] = [
   { n: 1, sub: "One lane · smile only", en: { jump: true, duck: false, fly: false, lanes: false } },
@@ -48,9 +48,9 @@ const calOk = (c: Partial<Record<M, Move>> | null, en: En) => !!c && needed(en).
 const levelOf = (en: En): 0 | 1 | 2 | 3 => LEVELS.find(L => (Object.keys(L.en) as (keyof En)[]).every(k => L.en[k] === en[k]))?.n ?? 0;
 const moveText = (en: En) => { const a: string[] = []; if (en.jump) a.push("smile to jump"); if (en.fly) a.push("raise your eyebrows to fly"); if (en.duck) a.push("frown to duck"); if (en.lanes) a.push("pucker left or right to change lanes"); return a.length > 1 ? a.slice(0, -1).join(", ") + (a.length > 2 ? "," : "") + " and " + a[a.length - 1] : a[0]; };
 const levelLabel = (st: Settings) => (st.level ? `Level ${st.level} · ${LEVELS[st.level - 1].sub}` : "Your own mix");
-const DEF: Settings = { len: 90, start: 14, ramp: 2, hints: true, haptics: true, level: 3, en: ALL };
+const DEF: Settings = { len: 90, start: 14, ramp: 2, hints: true, haptics: true, level: 3, en: ALL, mode: "hearts" };
 const SKEY = "smilequest.dash.settings";
-function loadSettings(): Settings { try { const j = JSON.parse(localStorage.getItem(SKEY) || "null"); if (j) { const en = { ...ALL, ...(j.en ?? {}) }; return { ...DEF, ...j, en: needed(en).length ? en : ALL, len: LENS.includes(j.len) ? j.len : DEF.len }; } } catch { /* ignore */ } return DEF; }
+function loadSettings(): Settings { try { const j = JSON.parse(localStorage.getItem(SKEY) || "null"); if (j) { const en = { ...ALL, ...(j.en ?? {}) }; return { ...DEF, ...j, mode: j.mode === "chase" ? "chase" : "hearts", en: needed(en).length ? en : ALL, len: LENS.includes(j.len) ? j.len : DEF.len }; } } catch { /* ignore */ } return DEF; }
 function saveSettings(s: Settings) { try { localStorage.setItem(SKEY, JSON.stringify(s)); } catch { /* ignore */ } }
 
 // ---------- world ----------
@@ -64,7 +64,7 @@ type G = {
   on: Record<M, boolean>; lev: Record<M, number>; rows: Row[]; coins: Coin[]; spawnZ: number; speed: number; mul: number; invuln: number; coinsGot: number; points: number;
   streak: number; best: number; cleared: number; stumbles: number; top: number; counts: Record<M, number>; clearedBy: Record<string, number>; stumbledBy: Record<string, number>;
   lostSince: number | null; adjust: boolean; manual: boolean; wh: number; py: number; hint: string; run: number; pend: Record<M, number>;
-  en: En; rec: AcRecorder; tutSteps: TutStep[]; tut: number; tutHit: boolean; tutWait: number; tutFlash: string; hold: number; flyLock: number; caught: number; bearY: number; bearT: number;
+  en: En; rec: AcRecorder; tutSteps: TutStep[]; tut: number; tutHit: boolean; tutWait: number; tutFlash: string; hold: number; flyLock: number; caught: number; bearY: number; bearT: number; chase: boolean;
 };
 const z5 = () => ({ jump: 0, fly: 0, duck: 0, right: 0, left: 0 });
 const fresh = (wh: number, en: En = ALL, base: ReturnType<typeof acFromSaved> = null): G => ({
@@ -72,7 +72,7 @@ const fresh = (wh: number, en: En = ALL, base: ReturnType<typeof acFromSaved> = 
   stage: "ready", readyLeft: .25, t: 0, dist: 0, lane: 1, lanePos: 1, cd: 0, jumpT: 0, crouchT: 0, jh: 0, act: [], jet: 0, fuel: 1,
   on: { jump: false, fly: false, duck: false, right: false, left: false }, lev: z5(), rows: [], coins: [], spawnZ: 60, speed: 0, mul: 1, invuln: 0, coinsGot: 0, points: 0,
   streak: 0, best: 0, cleared: 0, stumbles: 0, top: 0, counts: z5(), clearedBy: {}, stumbledBy: {}, lostSince: null, adjust: false, manual: false, wh, py: wh - BOTBAR - 40, hint: "", run: 0, pend: z5(),
-  tut: -1, tutHit: false, tutWait: 0, tutFlash: "", hold: 0, flyLock: 0, caught: 0, bearY: 230, bearT: 0,
+  tut: -1, tutHit: false, tutWait: 0, tutFlash: "", hold: 0, flyLock: 0, caught: 0, bearY: 230, bearT: 0, chase: false,
 });
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 function spawnRow(s: G, len: number) {
@@ -252,7 +252,7 @@ function drawWorld(c: CanvasRenderingContext2D, s: G, now: number) {
   c.fillStyle = "rgba(0,0,0,.32)"; c.beginPath(); c.ellipse(px, PY + 2, 24 - lift * .07, 7, 0, 0, 7); c.fill();
   if (lift < 5) for (let i = 0; i < 4; i++) { const t = (now / 320 + i * .25) % 1; c.fillStyle = `rgba(214,198,160,${(1 - t) * .35})`; c.beginPath(); c.arc(px + (i - 1.5) * 9, PY - t * 10, 3 + t * 6, 0, 7); c.fill(); }
   c.globalAlpha = s.invuln > 0 && Math.floor(now / 110) % 2 ? .55 : 1; drawFox(c, px, y0, bodyH, lift, s, now); c.globalAlpha = 1;
-  { const lvl = clamp(s.stumbles, 1, 3), tgt = s.caught > 0 ? 100 : s.bearT > 0 ? (lvl >= 3 ? 100 : lvl === 2 ? 112 : 122) : 230; s.bearY += (tgt - s.bearY) * .12;
+  { const lvl = s.chase ? 2 : clamp(s.stumbles, 1, 3), tgt = s.caught > 0 ? 100 : s.bearT > 0 ? (lvl >= 3 ? 100 : lvl === 2 ? 112 : 122) : 230; s.bearY += (tgt - s.bearY) * .12;
     if (s.bearY < 210) drawBear(c, px + Math.sin(now / 190) * 4, PY + s.bearY, lvl >= 3 ? 1.05 : lvl === 2 ? .95 : .85, now, s.caught > 0); }
   for (const o of objs) if (o.d < 0) o.draw();
   // embers + vignette
@@ -289,14 +289,14 @@ export default function Dash() {
   const video = useRef<HTMLVideoElement>(null), cvRef = useRef<HTMLCanvasElement>(null), calCv = useRef<HTMLCanvasElement>(null);
   const stream = useRef<MediaStream | null>(null), tracker = useRef<Awaited<ReturnType<typeof createTracker>> | null>(null);
   const latest = useRef<Frame | null>(null), g = useRef<G>(fresh(640));
-  const cfg = useRef({ len: 90, start: 14, ramp: 2, gain: 1.3, haptics: true, en: ALL }), liveGain = useRef(1.3);
+  const cfg = useRef({ len: 90, start: 14, ramp: 2, gain: 1.3, haptics: true, en: ALL, mode: "hearts" as "chase" | "hearts" }), liveGain = useRef(1.3);
   const [view, setView] = useState<"loading" | "hub" | "clearance" | "ready" | "settings" | "calibrate" | "stats" | "play" | "results">("loading");
   const [cal, setCal] = useState<Cal | null>(null), calRef = useRef<Cal | null>(null); calRef.current = cal;
   const [clear, setClear] = useState(false), [agree, setAgree] = useState(false);
   const [st, setSt] = useState<Settings>(DEF), stRef = useRef(st); stRef.current = st;
   const [msg, setMsg] = useState<string | null>(null), [busy, setBusy] = useState(false), [preview, setPreview] = useState(true), [gainUi, setGainUi] = useState(1.3);
   const [box, setBox] = useState({ w: 360, h: 640 });
-  const [ui, setUi] = useState({ stage: "ready" as "ready" | "play" | "done", ready: 6, left: 90, dist: 0, coins: 0, mul: 1, adjust: false, paused: false, hint: "", lev: z5() as Record<M, number>, on: { jump: false, fly: false, duck: false, right: false, left: false } as Record<M, boolean>, stumble: false, points: 0, lives: 3, tut: -1, tutText: "", tutTotal: 0 });
+  const [ui, setUi] = useState({ stage: "ready" as "ready" | "play" | "done", ready: 6, left: 90, dist: 0, coins: 0, mul: 1, adjust: false, paused: false, hint: "", lev: z5() as Record<M, number>, on: { jump: false, fly: false, duck: false, right: false, left: false } as Record<M, boolean>, stumble: false, points: 0, lives: 3, close: false, tut: -1, tutText: "", tutTotal: 0 });
   const [result, setResult] = useState<Result | null>(null), [games, setGames] = useState<GameRow[] | null>(null);
   const [calFrom, setCalFrom] = useState<"play" | "settings">("play");
   const [calStep, setCalStep] = useState(0), [calCam, setCalCam] = useState<"off" | "loading" | "on">("off");
@@ -390,9 +390,9 @@ export default function Dash() {
       const v = video.current!; v.srcObject = s; await v.play();
       tracker.current = await createTracker(v, f => { latest.current = f; });
       const wh = clamp(Math.round(W * innerHeight / innerWidth), 560, 800), sc = Math.min(innerWidth / W, innerHeight / wh);
-      cfg.current = { len: st.len, start: st.start, ramp: st.ramp, gain: 1.3, haptics: st.haptics, en: st.en }; liveGain.current = 1.3; setGainUi(1.3);
-      g.current = fresh(wh, st.en, acBase.current); if (tut) { g.current.tut = 0; g.current.readyLeft = .25; } setBox({ w: W * sc, h: wh * sc });
-      setUi(u => ({ ...u, stage: "ready", ready: 6, left: st.len, dist: 0, coins: 0, mul: 1, adjust: false, paused: false, hint: "", stumble: false, points: 0, lives: 3, tut: tut ? 0 : -1, tutText: "", tutTotal: g.current.tutSteps.length })); setView("play");
+      cfg.current = { len: st.len, start: st.start, ramp: st.ramp, gain: 1.3, haptics: st.haptics, en: st.en, mode: st.mode }; liveGain.current = 1.3; setGainUi(1.3);
+      g.current = fresh(wh, st.en, acBase.current); g.current.chase = st.mode === "chase"; if (tut) { g.current.tut = 0; g.current.readyLeft = .25; } setBox({ w: W * sc, h: wh * sc });
+      setUi(u => ({ ...u, stage: "ready", ready: 6, left: st.len, dist: 0, coins: 0, mul: 1, adjust: false, paused: false, hint: "", stumble: false, points: 0, lives: 3, close: false, tut: tut ? 0 : -1, tutText: "", tutTotal: g.current.tutSteps.length })); setView("play");
     } catch (e: any) { stop(); setMsg(e?.name === "NotAllowedError" ? "Camera access is blocked. Allow it in your browser’s site settings, then try again." : `Couldn’t start the camera: ${e?.message ?? e}`); setView("hub"); }
     setBusy(false);
   }
@@ -403,7 +403,7 @@ export default function Dash() {
     setResult(r); setView("results");
     try {
       const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) return;
-      const { error } = await sb.from("dash_games").insert({ user_id: user.id, duration_seconds: r.seconds, points: r.points, distance: r.distance, coins: r.coins, cleared: r.cleared, stumbles: r.stumbles, best_streak: r.bestStreak, top_speed: r.topSpeed, completed, per_move: { caught, accuracy: r.acc, ac: r.ac, level: st.level, en: s.en, counts: s.counts, clearedBy: s.clearedBy, stumbledBy: s.stumbledBy }, settings: { len: cfg.current.len, start: cfg.current.start, ramp: cfg.current.ramp } });
+      const { error } = await sb.from("dash_games").insert({ user_id: user.id, duration_seconds: r.seconds, points: r.points, distance: r.distance, coins: r.coins, cleared: r.cleared, stumbles: r.stumbles, best_streak: r.bestStreak, top_speed: r.topSpeed, completed, per_move: { caught, accuracy: r.acc, ac: r.ac, level: st.level, mode: st.mode, en: s.en, counts: s.counts, clearedBy: s.clearedBy, stumbledBy: s.stumbledBy }, settings: { len: cfg.current.len, start: cfg.current.start, ramp: cfg.current.ramp } });
       if (error) { setMsg(`This run couldn’t be saved: ${error.message}`); return; }
       setResult(x => x && { ...x, saved: true });
     } catch (e: any) { setMsg(`This run couldn’t be saved: ${e?.message ?? e}`); }
@@ -468,7 +468,7 @@ export default function Dash() {
         if (dd > -1 && dd < .9 && s.invuln > 0) r.free = true;
         if (r.zone && !r.hit && dd > -1 && dd < .9 && s.invuln <= 0 && r.lanes.some(l => Math.abs(s.lanePos - l) < .55)) {
           const hit = r.kind === "hurdle" ? h < .5 : r.kind === "bar" ? !crouch && s.jet < .8 : s.jet < .8;
-          if (hit) { r.hit = true; s.mul = .6; s.streak = 0; if (s.tut >= 0) { s.invuln = .8; s.tutHit = true; if (cfg.current.haptics) buzz(60); } else { s.invuln = 1.8; { const gap = base * 1.4; for (const q of s.rows) if (q !== r && q.z - s.dist > 2) q.z += gap; for (const c2 of s.coins) if (c2.z - s.dist > 2) c2.z += gap; s.spawnZ += gap; } s.stumbles++; s.stumbledBy[r.kind] = (s.stumbledBy[r.kind] ?? 0) + 1; s.bearT = 2.8; if (s.stumbles >= 3) s.caught = 1.2; if (cfg.current.haptics) buzz(s.stumbles >= 3 ? [120, 60, 200] : 90); } }
+          if (hit) { r.hit = true; s.mul = .6; s.streak = 0; if (s.tut >= 0) { s.invuln = .8; s.tutHit = true; if (cfg.current.haptics) buzz(60); } else { s.invuln = 1.8; { const gap = base * 1.4; for (const q of s.rows) if (q !== r && q.z - s.dist > 2) q.z += gap; for (const c2 of s.coins) if (c2.z - s.dist > 2) c2.z += gap; s.spawnZ += gap; } s.stumbles++; s.stumbledBy[r.kind] = (s.stumbledBy[r.kind] ?? 0) + 1; { const chase = cfg.current.mode === "chase", was = s.bearT > 0; s.bearT = chase ? 6 : 2.8; if (chase ? was : s.stumbles >= 3) s.caught = 1.2; } if (cfg.current.haptics) buzz(s.caught > 0 ? [120, 60, 200] : 90); } }
         }
         if (!r.done && dd < -1.2) { r.done = true; if (!r.hit && r.threat) { s.cleared++; s.points += 10; s.streak++; s.best = Math.max(s.best, s.streak); if (!r.free) s.clearedBy[r.kind] = (s.clearedBy[r.kind] ?? 0) + 1; } }
         if (!hint && !r.done && dd > 0 && dd < 45 && r.lanes.includes(s.lane) && !r.hit) {
@@ -489,7 +489,7 @@ export default function Dash() {
     };
     const loop = (now: number) => { raf = requestAnimationFrame(loop); const dt = Math.min(.05, (now - prev) / 1000); prev = now; step(dt, now); drawWorld(ctx, g.current, now); };
     raf = requestAnimationFrame(loop);
-    const id = setInterval(() => { const s = g.current; setUi(u => ({ ...u, stage: s.stage, ready: Math.max(0, Math.ceil(s.readyLeft)), left: Math.max(0, Math.ceil(cfg.current.len - s.t)), dist: Math.round(s.dist), coins: s.coinsGot, mul: Math.round(s.speed / cfg.current.start * 10) / 10, adjust: s.adjust, paused: s.manual, hint: s.hint, lev: { ...s.lev }, on: { ...s.on }, stumble: s.invuln > 0, points: s.points, lives: Math.max(0, 3 - s.stumbles), tut: s.tut, tutText: s.hint, tutTotal: s.tutSteps.length })); }, 100);
+    const id = setInterval(() => { const s = g.current; setUi(u => ({ ...u, stage: s.stage, ready: Math.max(0, Math.ceil(s.readyLeft)), left: Math.max(0, Math.ceil(cfg.current.len - s.t)), dist: Math.round(s.dist), coins: s.coinsGot, mul: Math.round(s.speed / cfg.current.start * 10) / 10, adjust: s.adjust, paused: s.manual, hint: s.hint, lev: { ...s.lev }, on: { ...s.on }, stumble: s.invuln > 0, points: s.points, lives: s.chase ? 3 : Math.max(0, 3 - s.stumbles), close: s.bearT > 0, tut: s.tut, tutText: s.hint, tutTotal: s.tutSteps.length })); }, 100);
     return () => { cancelAnimationFrame(raf); clearInterval(id); removeEventListener("resize", fit); document.body.style.overflow = prevScroll; };
   }, [view]);
 
@@ -541,7 +541,7 @@ export default function Dash() {
       <Page><h1 className="font-display text-3xl">How to play</h1><Rule />
         <p className="mt-2 text-navy/70">Your runner keeps running. Use {needed(st.en).length === 1 ? "this movement" : "these movements"} to get past the obstacles. The run gets faster as it goes.</p>
         <ul className="mt-4 grid gap-2">{MOVES.filter(m => enOf(st.en, m)).map(m => <li key={m} className="flex items-center gap-3 rounded-2xl bg-paper p-3 shadow-soft"><Rune m={m} size={44} /><span className="flex-1"><b>{INFO[m].action}</b><br /><span className="text-sm text-navy/70">{INFO[m].name}</span></span></li>)}</ul>
-        <p className="mt-3 text-xs text-navy/60">{st.en.duck ? "Keep smiling or frowning to cross a row of obstacles." : "Keep smiling to cross a row of obstacles."} Three stumbles and the bear catches up, so go gently.</p>
+        <p className="mt-3 text-xs text-navy/60">{st.en.duck ? "Keep smiling or frowning to cross a row of obstacles." : "Keep smiling to cross a row of obstacles."} {st.mode === "chase" ? "Stumble twice in a row and the bear catches you, so go gently." : "Three stumbles and the bear catches up, so go gently."}</p>
         {msg && <p role="alert" className="mt-3 rounded-2xl bg-lav/50 p-3 text-sm">{msg}</p>}
         <button className="btn-primary mt-5 min-h-[64px] w-full text-xl" disabled={busy} onClick={() => startGame()}>{busy ? "Starting camera…" : "I’m ready"}</button>
         <button className="btn-quiet mt-3 w-full" onClick={() => setView("hub")}>Back</button></Page>);
@@ -592,16 +592,18 @@ export default function Dash() {
             <label key={k} className="flex items-center justify-between gap-4 rounded-2xl bg-mist/50 p-3"><span><b>{n}</b><br /><span className="text-xs text-navy/60">{d}</span></span>
               <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.en[k]} onChange={e => { const en = { ...st.en, [k]: e.target.checked }; if (!needed(en).length) return; update({ en, level: levelOf(en) }); }} /></label>)}</div>
           {!calOk(cal, st.en) && <p className="mt-3 text-xs text-navy/60">Some of these movements aren’t calibrated yet. We’ll set them up when you press Play.</p>}</section>
-                <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">2. Run length</h2>
+        <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">2. Game mode</h2>
+          <div className="mt-3 grid gap-2" role="radiogroup" aria-label="Game mode">{([["chase", "Mode 1: Bear chase", "The bear follows you. One stumble brings it close. Stumble again before it falls back and it catches you."], ["hearts", "Mode 2: Three hearts", "You can stumble up to three times. The bear catches up on the third."]] as ["chase" | "hearts", string, string][]).map(([k, n, d]) => <button key={k} role="radio" aria-checked={st.mode === k} onClick={() => update({ mode: k })} className={`rounded-2xl border p-3 text-left transition ${st.mode === k ? "border-teal bg-teal/10" : "border-navy/15"}`}><b>{n}</b><br /><span className="text-sm text-navy/70">{d}</span></button>)}</div></section>
+                <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">3. Run length</h2>
           <div className="mt-3 grid grid-cols-3 gap-2" role="radiogroup" aria-label="Run length">{LENS.map(v => <button key={v} role="radio" aria-checked={st.len === v} onClick={() => update({ len: v })} className={`min-h-[56px] ${choice(st.len === v)}`}>{v}s</button>)}</div></section>
-        <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">3. Starting speed</h2>
+        <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">4. Starting speed</h2>
           <div className="mt-3 grid grid-cols-3 gap-2" role="radiogroup" aria-label="Starting speed">{STARTS.map(x => <button key={x.v} role="radio" aria-checked={st.start === x.v} onClick={() => update({ start: x.v })} className={`min-h-[56px] ${choice(st.start === x.v)}`}>{x.n}</button>)}</div></section>
-        <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">4. How much it speeds up</h2>
+        <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">5. How much it speeds up</h2>
           <div className="mt-3 grid grid-cols-3 gap-2" role="radiogroup" aria-label="Speed increase">{RAMPS.map(x => <button key={x.v} role="radio" aria-checked={st.ramp === x.v} onClick={() => update({ ramp: x.v })} className={`min-h-[56px] ${choice(st.ramp === x.v)}`}>{x.n}</button>)}</div>
           <p className="mt-2 text-xs text-navy/60">By the end of the run you’ll be going about {st.ramp}× your starting speed.</p></section>
-        <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>5. Hints</b><br /><span className="text-sm text-navy/60">Show which movement to make for the next obstacle.</span></span>
+        <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>6. Hints</b><br /><span className="text-sm text-navy/60">Show which movement to make for the next obstacle.</span></span>
           <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.hints} onChange={e => update({ hints: e.target.checked })} aria-label="Hints" /></label>
-        <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>6. Vibration</b><br /><span className="text-sm text-navy/60">Buzz after calibration steps, at the start, and when you stumble. Works on phones that allow it.</span></span>
+        <label className="mt-3 flex items-center justify-between gap-4 rounded-3xl bg-paper p-5 shadow-soft"><span><b>7. Vibration</b><br /><span className="text-sm text-navy/60">Buzz after calibration steps, at the start, and when you stumble. Works on phones that allow it.</span></span>
           <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.haptics} onChange={e => update({ haptics: e.target.checked })} aria-label="Vibration" /></label>
         <button className="btn-quiet mt-4 w-full" onClick={() => openCalibrate("settings")}>Recalibrate</button>
         <button className="btn-primary mt-3 w-full" onClick={() => setView("hub")}>Done</button></Page>);
@@ -633,7 +635,7 @@ export default function Dash() {
       return (
         <Page><h1 className="font-display text-3xl">{R.completed ? "Run complete." : R.caught ? "The bear caught up." : "Run ended early."}</h1><Rule />
           <CommissureCard ac={R.ac} />
-          <p className="mt-2 text-navy/70">{R.caught ? "Three stumbles and it caught up. Every run is practice." : "Nice work. Every run counts."}</p>
+          <p className="mt-2 text-navy/70">{R.caught ? (st.mode === "chase" ? "Two stumbles in a row and it caught up. Every run is practice." : "Three stumbles and it caught up. Every run is practice.") : "Nice work. Every run counts."}</p>
           <div className="mt-5 grid grid-cols-2 gap-3">{([["Points", String(R.points)], ["Distance", `${R.distance} m`], ["Coins", String(R.coins)], ["Obstacles cleared", String(R.cleared)], ["Stumbles", String(R.stumbles)], ["Top speed", `${R.topSpeed.toFixed(1)}`]] as [string, string][]).map(([k, v]) => <div key={k} className="rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-3xl">{v}</div><div className="text-xs text-navy/60">{k}</div></div>)}
             <div className="col-span-2 rounded-2xl bg-paper p-4 shadow-soft"><div className="font-display text-3xl">{R.bestStreak}</div><div className="text-xs text-navy/60">Best streak (obstacles cleared in a row)</div></div></div>
           <section className="mt-5 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">Accuracy by movement</h2>
@@ -661,7 +663,8 @@ export default function Dash() {
               <div className="mt-1 flex items-center justify-end gap-1.5 dt-h text-lg leading-none text-[#eceaff]"><Coin size={18} /> {ui.coins}</div>
               <div className="mt-1 text-[10px] uppercase tracking-widest text-[#a9a8d6]">{ui.dist} m · {ui.left}s</div></div>
               : <div className="absolute right-3 top-0 rounded-2xl border border-[#8fd0ff]/40 bg-[#0f1038]/80 px-3 py-2 text-right shadow-soft" role="status"><div className="dt-h text-lg text-[#eceaff]">Tutorial</div><div className="text-[10px] uppercase tracking-widest text-[#a9a8d6]">{Math.min(ui.tut + 1, ui.tutTotal)} of {ui.tutTotal}</div></div>}
-            {ui.tut < 0 && <div className="absolute left-3 top-[64px] flex gap-1" aria-label={`${ui.lives} of 3 chances left`}>{[0, 1, 2].map(i => <svg key={i} width="22" height="20" viewBox="0 0 24 22" aria-hidden><path d="M12 21C5 15 1 11.5 1 7.2 1 4 3.4 2 6.2 2c2.3 0 4.2 1.2 5.8 3.3C13.600 3.200 15.500 2 17.800 2 20.600 2 23 4 23 7.200 23 11.500 19 15 12 21z" fill={i < ui.lives ? "#ff7a9c" : "none"} stroke="#ff7a9c" strokeOpacity={i < ui.lives ? 1 : .45} strokeWidth="1.6" /></svg>)}</div>}
+            {ui.tut < 0 && st.mode === "chase" && <div className={`absolute left-3 top-[64px] rounded-full px-3 py-1 text-xs font-semibold ${ui.close ? "bg-[#ff7a9c] text-[#1a1040]" : "border border-[#a9a8d6]/50 text-[#a9a8d6]"}`} role="status">{ui.close ? "Bear is close!" : "Bear is behind you"}</div>}
+            {ui.tut < 0 && st.mode === "hearts" && <div className="absolute left-3 top-[64px] flex gap-1" aria-label={`${ui.lives} of 3 chances left`}>{[0, 1, 2].map(i => <svg key={i} width="22" height="20" viewBox="0 0 24 22" aria-hidden><path d="M12 21C5 15 1 11.5 1 7.2 1 4 3.4 2 6.2 2c2.3 0 4.2 1.2 5.8 3.3C13.600 3.200 15.500 2 17.800 2 20.600 2 23 4 23 7.200 23 11.500 19 15 12 21z" fill={i < ui.lives ? "#ff7a9c" : "none"} stroke="#ff7a9c" strokeOpacity={i < ui.lives ? 1 : .45} strokeWidth="1.6" /></svg>)}</div>}
           </div></div>
         {(st.hints || ui.tut >= 0) && ui.stage === "play" && ui.hint && <div className="pointer-events-none absolute inset-x-0 z-20 flex justify-center" style={{ top: "calc(env(safe-area-inset-top, 0px) + 10px)" }}><div className="w-[44%] rounded-2xl border border-[#8fd0ff]/60 bg-[#0f1038]/85 px-3 py-2 text-center dt-h text-sm leading-snug tracking-wide text-[#eceaff] shadow-soft" role="status">{ui.hint}</div></div>}
         {ui.stumble && ui.stage === "play" && ui.tut < 0 && ui.lives > 0 && <div className="pointer-events-none absolute inset-x-0 z-20 text-center text-sm font-semibold text-[#eceaff]" style={{ top: "calc(env(safe-area-inset-top, 0px) + 84px)" }}>Keep going!</div>}
