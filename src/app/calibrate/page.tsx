@@ -17,11 +17,11 @@ const COPY: Record<Id, { title: string; cue: string; tip: string; games: string 
   pucker: { title: "Lip pucker", cue: "Round your lips like “ooo”", tip: "Gently purse them and hold.", games: "Flight" },
   right: { title: "Pucker to your right", cue: "Pucker, then nudge your lips to your right", tip: "Round your lips, then shift them toward your right cheek.", games: "Dash" },
   left: { title: "Pucker to your left", cue: "Pucker, then nudge your lips to your left", tip: "Round your lips, then shift them toward your left cheek.", games: "Dash" },
-  tright: { title: "Tongue to your right", cue: "Stick your tongue out and point it to your right", tip: "Optional. A gentle point toward your right cheek, tongue out. Only if you want to use your tongue instead of a pucker.", games: "Dash (tongue option)" },
-  tleft: { title: "Tongue to your left", cue: "Stick your tongue out and point it to your left", tip: "Optional. A gentle point toward your left cheek, tongue out.", games: "Dash (tongue option)" },
+  tright: { title: "Tongue to your right", cue: "Tongue out, push it to your right", tip: "Stick your tongue out and push it toward your right cheek, so your jaw and lips shift a little. Optional.", games: "Dash (tongue option)" },
+  tleft: { title: "Tongue to your left", cue: "Tongue out, push it to your left", tip: "Stick your tongue out and push it toward your left cheek, so your jaw and lips shift a little. Optional.", games: "Dash (tongue option)" },
   close: { title: "Gentle eye closure", cue: "Close your eyes softly", tip: "Soft, like resting. No squeezing.", games: "Flight" },
 };
-const MINSK: Record<SK, number> = { smile: .015, brow: .015, frown: .04, pucker: .08, close: .08, sideA: .08, sideB: .08, tonA: .04, tonB: .04 };
+const MINSK: Record<SK, number> = { smile: .015, brow: .015, frown: .04, pucker: .08, close: .08, sideA: .08, sideB: .08, tonA: .03, tonB: .03 };
 const CAL_KEYS = ["smile", "brow", "pucker", "close", "liftL", "liftR", "browL", "browR", "closeL", "closeR"] as (keyof Vals)[];
 const FSIDES: Record<string, (keyof Vals)[] | null> = { smile: ["liftL", "liftR"], brow: ["browL", "browR"], pucker: null, close: ["closeL", "closeR"] };
 const sig = (v: Vals): Record<SK, number> => ({ smile: v.smile, brow: v.brow, frown: v.frown, pucker: v.pucker, close: v.close, sideA: v.sideA - 0.6 * v.sideB + 0.3 * v.pucker, sideB: v.sideB - 0.6 * v.sideA + 0.3 * v.pucker, tonA: v.tonA, tonB: v.tonB });
@@ -162,7 +162,7 @@ export default function Calibrate() {
                 const nu = r.neutral, tng = id === "tright" || id === "tleft", fam: SK[] = tng ? ["tonA", "tonB"] : ["sideA", "sideB"], isR = id === "right" || id === "tright", isL = id === "left" || id === "tleft", rkey = tng ? (r.trightKey ?? r.lockTRight) : (r.rightKey ?? r.lockRight), lockK = tng ? r.lockTRight : r.lockRight, cands: SK[] = isR ? (lockK ? [lockK] : fam) : isL ? (rkey ? [rkey === fam[0] ? fam[1] : fam[0]] : fam) : [id as SK];
                 let bk = cands[0], br = -9;
                 for (const k of cands) { const a = r.buf.map(q => sig(q)[k]), n = nu.sk[k], ratio = (topMean(a) - n.mean) / Math.max(3 * n.std, MINSK[k]); if (ratio > br) { br = ratio; bk = k; } }
-                if (br > 1) { r.samples[id] = r.buf; if (id === "right") r.rightKey = bk; if (id === "tright") r.trightKey = bk; r.phase = "flash"; r.flashUntil = now + 1200; buzz(110); }
+                if (br > (tng ? 0.6 : 1)) { r.samples[id] = r.buf; if (id === "right") r.rightKey = bk; if (id === "tright") r.trightKey = bk; r.phase = "flash"; r.flashUntil = now + 1200; buzz(110); }
                 else { r.fails++; r.phase = "brief"; r.phaseStart = now; r.buf = []; }
               } else enter("rest");
             }
