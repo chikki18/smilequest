@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { createTracker, type Frame, type Vals } from "@/lib/tracking";
 import { POLICY_VERSION } from "@/lib/onboarding";
+import { dailyDue, dailyUrl } from "@/lib/daily";
 
 // ---------- moves ----------
 type M = "tright" | "tleft" | "tout";
@@ -172,6 +173,7 @@ export default function Slice() {
   useEffect(() => { (async () => {
     const sb = supabase(); const { data: { user } } = await sb.auth.getUser();
     if (!user) { location.href = "/"; return; }
+    if (await dailyDue()) { location.href = dailyUrl("/slice?ready=1"); return; }
     setSt(loadSettings());
     const { data: c } = await sb.from("dash_calibration").select("summary").maybeSingle();
     const mv = (c as any)?.summary?.moves; if (mv) setCal(mv as Cal);
@@ -306,7 +308,7 @@ export default function Slice() {
     if (view === "clearance") return (
       <Page><h1 className="font-display text-3xl">Before you start</h1><Rule />
         <p className="mt-3 text-navy/70">Mirror Slice asks you to move your tongue in gentle, quick motions. Only continue if your clinician says these exercises are okay for you, and stop any time you feel discomfort or strain.</p>
-        <p className="mt-3 text-navy/70">Your camera is used only while you play. It’s processed on your device, and video is never uploaded or saved.</p>
+        <p className="mt-3 text-navy/70">Your camera is used only while you play. During play it’s processed on your device, and video is never uploaded or saved. The only exception is the optional recalibration video, which you can turn on or off in the recalibration section.</p>
         <label className="mt-5 flex items-start gap-3 rounded-2xl bg-gold/20 p-4 text-sm"><input type="checkbox" className="mt-1 h-5 w-5 accent-teal" checked={agree} onChange={e => setAgree(e.target.checked)} />
           <span>My clinician has said gentle facial and tongue exercises are okay for me, and I understand I can stop at any time.</span></label>
         {msg && <p role="alert" className="mt-3 rounded-2xl bg-lav/50 p-3 text-sm">{msg}</p>}
