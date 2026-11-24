@@ -5,11 +5,11 @@ import { createTracker, type Frame, type Vals } from "@/lib/tracking";
 import { meanAC, acFromSaved, type AC } from "@/lib/commissure";
 
 // ---------- what we measure ----------
-type Id = "smile" | "brow" | "frown" | "pucker" | "right" | "left" | "tright" | "tleft" | "close";
-type SK = "smile" | "brow" | "frown" | "pucker" | "close" | "sideA" | "sideB" | "tonA" | "tonB";
+type Id = "smile" | "brow" | "frown" | "pucker" | "right" | "left" | "tright" | "tleft" | "tout" | "close";
+type SK = "smile" | "brow" | "frown" | "pucker" | "close" | "sideA" | "sideB" | "tonA" | "tonB" | "tongue";
 type Step = "intro" | "align" | "rest" | Id | "review";
-const ORDER: Step[] = ["intro", "align", "rest", "smile", "brow", "frown", "pucker", "right", "left", "tright", "tleft", "close", "review"];
-const MOVES: Id[] = ["smile", "brow", "frown", "pucker", "right", "left", "tright", "tleft", "close"];
+const ORDER: Step[] = ["intro", "align", "rest", "smile", "brow", "frown", "pucker", "right", "left", "close", "tright", "tleft", "tout", "review"];
+const MOVES: Id[] = ["smile", "brow", "frown", "pucker", "right", "left", "close", "tright", "tleft", "tout"];
 const COPY: Record<Id, { title: string; cue: string; tip: string; games: string }> = {
   smile: { title: "Smile", cue: "Close-mouth smile or smile with teeth", tip: "Either style works. Never force it.", games: "Flight · Dash" },
   brow: { title: "Eyebrow raise", cue: "Lift your eyebrows", tip: "Raise them gently, as if mildly surprised.", games: "Flight · Dash" },
@@ -17,15 +17,16 @@ const COPY: Record<Id, { title: string; cue: string; tip: string; games: string 
   pucker: { title: "Lip pucker", cue: "Round your lips like “ooo”", tip: "Gently purse them and hold.", games: "Flight" },
   right: { title: "Pucker to your right", cue: "Pucker, then nudge your lips to your right", tip: "Round your lips, then shift them toward your right cheek.", games: "Dash" },
   left: { title: "Pucker to your left", cue: "Pucker, then nudge your lips to your left", tip: "Round your lips, then shift them toward your left cheek.", games: "Dash" },
-  tright: { title: "Tongue to your right", cue: "Tongue out, push it to your right", tip: "Stick your tongue out and push it toward your right cheek, so your jaw and lips shift a little. Optional.", games: "Dash (tongue option)" },
-  tleft: { title: "Tongue to your left", cue: "Tongue out, push it to your left", tip: "Stick your tongue out and push it toward your left cheek, so your jaw and lips shift a little. Optional.", games: "Dash (tongue option)" },
+  tright: { title: "Tongue swipe right", cue: "Tongue out, sweep it to your right", tip: "Stick your tongue out and sweep it toward your right cheek. A big, clear sweep works best.", games: "Fruit Slice" },
+  tleft: { title: "Tongue swipe left", cue: "Tongue out, sweep it to your left", tip: "Stick your tongue out and sweep it toward your left cheek. A big, clear sweep works best.", games: "Fruit Slice" },
+  tout: { title: "Tongue poke", cue: "Poke your tongue straight out", tip: "Stick your tongue straight out, like saying “ahh”, and hold it.", games: "Fruit Slice" },
   close: { title: "Gentle eye closure", cue: "Close your eyes softly", tip: "Soft, like resting. No squeezing.", games: "Flight" },
 };
-const MINSK: Record<SK, number> = { smile: .015, brow: .015, frown: .04, pucker: .08, close: .08, sideA: .08, sideB: .08, tonA: .03, tonB: .03 };
+const MINSK: Record<SK, number> = { smile: .015, brow: .015, frown: .04, pucker: .08, close: .08, sideA: .08, sideB: .08, tonA: .03, tonB: .03, tongue: .12 };
 const CAL_KEYS = ["smile", "brow", "pucker", "close", "liftL", "liftR", "browL", "browR", "closeL", "closeR"] as (keyof Vals)[];
 const FSIDES: Record<string, (keyof Vals)[] | null> = { smile: ["liftL", "liftR"], brow: ["browL", "browR"], pucker: null, close: ["closeL", "closeR"] };
-const sig = (v: Vals): Record<SK, number> => ({ smile: v.smile, brow: v.brow, frown: v.frown, pucker: v.pucker, close: v.close, sideA: v.sideA - 0.6 * v.sideB + 0.3 * v.pucker, sideB: v.sideB - 0.6 * v.sideA + 0.3 * v.pucker, tonA: v.tonA, tonB: v.tonB });
-const SKS: SK[] = ["smile", "brow", "frown", "pucker", "close", "sideA", "sideB", "tonA", "tonB"];
+const sig = (v: Vals): Record<SK, number> => ({ smile: v.smile, brow: v.brow, frown: v.frown, pucker: v.pucker, close: v.close, sideA: v.sideA - 0.6 * v.sideB + 0.3 * v.pucker, sideB: v.sideB - 0.6 * v.sideA + 0.3 * v.pucker, tonA: v.tonA, tonB: v.tonB, tongue: v.tongue });
+const SKS: SK[] = ["smile", "brow", "frown", "pucker", "close", "sideA", "sideB", "tonA", "tonB", "tongue"];
 const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / (a.length || 1);
 const sd = (a: number[]) => { const m = mean(a); return Math.sqrt(mean(a.map(x => (x - m) ** 2))); };
 const topMean = (a: number[]) => mean([...a].sort((x, y) => y - x).slice(0, Math.max(5, Math.floor(a.length / 4))));
@@ -42,7 +43,7 @@ function Guide({ id, size = 64 }: { id: Id | "rest" | "pucker"; size?: number })
       {id === "brow" ? <><path d="M26 33q9-9 18 0M56 33q9-9 18 0" /><circle cx="35" cy="46" r="4" fill={BLUE} /><circle cx="65" cy="46" r="4" fill={BLUE} /></>
         : id === "close" ? <><path d="M27 46q8 7 16 0M57 46q8 7 16 0" /><path d="M27 36q8-4 16 0M57 36q8-4 16 0" strokeOpacity=".6" /></>
         : <><path d="M27 37q8-4 16 0M57 37q8-4 16 0" strokeOpacity=".7" /><circle cx="36" cy="47" r="3" fill={BLUE} /><circle cx="64" cy="47" r="3" fill={BLUE} /></>}
-      {id === "smile" ? <path d="M33 68q17 14 34 0" /> : id === "frown" ? <path d="M35 77q15-12 30 0" /> : tg ? <><path d="M42 66h16q0 6-8 6t-8-6z" /><path d={`M${50 + td * 2} 70q${td * 4} 9 ${td * 9} 7`} stroke="#ff9db4" /></> : id === "pucker" || id === "right" || id === "left" ? <circle cx={50 + sx * 2.4} cy="70" r="6.5" /> : id === "brow" ? <path d="M40 70h20" /> : <path d="M38 70h24" strokeOpacity=".7" />}
+      {id === "smile" ? <path d="M33 68q17 14 34 0" /> : id === "frown" ? <path d="M35 77q15-12 30 0" /> : id === "tout" ? <><path d="M40 66h20q0 7-10 7t-10-7z" fill={BLUE} fillOpacity=".15" /><path d="M45 71q5 17 10 0" stroke="#ff9db4" fill="#ff9db4" fillOpacity=".5" /></> : tg ? <><path d="M42 66h16q0 6-8 6t-8-6z" /><path d={`M${50 + td * 2} 70q${td * 4} 9 ${td * 9} 7`} stroke="#ff9db4" /></> : id === "pucker" || id === "right" || id === "left" ? <circle cx={50 + sx * 2.4} cy="70" r="6.5" /> : id === "brow" ? <path d="M40 70h20" /> : <path d="M38 70h24" strokeOpacity=".7" />}
       {(id === "right" || id === "left" || tg) && <path d={id === "right" || id === "tright" ? "M68 70h14m-5-5l5 5-5 5" : "M32 70H18m5-5l-5 5 5 5"} />}
     </svg>);
 }
@@ -111,6 +112,7 @@ export default function Calibrate() {
     let tk: SK | null = S.current.lockTRight;
     if (sm.tright?.length) { const lk = S.current.lockTRight, a = mv(sm.tright, "tonA"), b = mv(sm.tright, "tonB"), win = lk ? mv(sm.tright, lk) : a.range / MINSK.tonA >= b.range / MINSK.tonB ? a : b; tk = win.key; dash.tright = win; status.tright = win.detectable ? "ok" : "weak"; } else status.tright = "skipped";
     if (sm.tleft?.length && tk) { const w = mv(sm.tleft, "tonA", tk === "tonA" ? "tonB" : "tonA"); dash.tleft = w; status.tleft = w.detectable ? "ok" : "weak"; } else status.tleft = "skipped";
+    if (sm.tout?.length) { const w = mv(sm.tout, "tongue"); dash.tout = w; status.tout = w.detectable ? "ok" : "weak"; } else status.tout = "skipped";
     const neutral: Record<string, { mean: number; std: number }> = {}; for (const k of CAL_KEYS) neutral[k as string] = nu.raw[k as string];
     return { flight, dash, neutral, status };
   }
@@ -138,7 +140,7 @@ export default function Calibrate() {
       // ---- state machine ----
       if (r.step === "align") { r.progress = r.locked ? Math.min(1, (now - r.alignedSince - 700) / 1300) : 0; hint = r.locked ? "Locked in" : hint; if (r.locked && now - r.alignedSince > 2000) { buzz(60); enter("rest"); } }
       else if (r.step === "rest" || (MOVES as string[]).includes(r.step)) {
-        const isRest = r.step === "rest", id = r.step as Id, BRIEF = 3500, HOLD = 3000;
+        const isRest = r.step === "rest", id = r.step as Id, BRIEF = 3500, easy = id === "tright" || id === "tleft" || id === "tout", HOLD = easy ? 2200 : 3000;
         if (r.phase === "flash") { hint = isRest ? "Baseline saved" : "Got it"; r.progress = 1; if (now > r.flashUntil) { if (isRest) enter(S.current.one ?? "smile"); else enter(r.redo ? "review" : ORDER[ORDER.indexOf(r.step) + 1]); } }
         else if (!rough || !good) {
           if (!r.lostAt) r.lostAt = now;
@@ -159,10 +161,10 @@ export default function Calibrate() {
                   r.neutral = nu; r.ac0 = meanAC(r.acBuf); r.phase = "flash"; r.flashUntil = now + 1100; buzz(100);
                 } else { r.fails++; r.phase = "brief"; r.phaseStart = now; }
               } else if (r.neutral) {
-                const nu = r.neutral, tng = id === "tright" || id === "tleft", fam: SK[] = tng ? ["tonA", "tonB"] : ["sideA", "sideB"], isR = id === "right" || id === "tright", isL = id === "left" || id === "tleft", rkey = tng ? (r.trightKey ?? r.lockTRight) : (r.rightKey ?? r.lockRight), lockK = tng ? r.lockTRight : r.lockRight, cands: SK[] = isR ? (lockK ? [lockK] : fam) : isL ? (rkey ? [rkey === fam[0] ? fam[1] : fam[0]] : fam) : [id as SK];
+                const nu = r.neutral, tng = id === "tright" || id === "tleft", fam: SK[] = tng ? ["tonA", "tonB"] : ["sideA", "sideB"], isR = id === "right" || id === "tright", isL = id === "left" || id === "tleft", rkey = tng ? (r.trightKey ?? r.lockTRight) : (r.rightKey ?? r.lockRight), lockK = tng ? r.lockTRight : r.lockRight, cands: SK[] = isR ? (lockK ? [lockK] : fam) : isL ? (rkey ? [rkey === fam[0] ? fam[1] : fam[0]] : fam) : [id === "tout" ? "tongue" : id as SK];
                 let bk = cands[0], br = -9;
                 for (const k of cands) { const a = r.buf.map(q => sig(q)[k]), n = nu.sk[k], ratio = (topMean(a) - n.mean) / Math.max(3 * n.std, MINSK[k]); if (ratio > br) { br = ratio; bk = k; } }
-                if (br > (tng ? 0.6 : 1)) { r.samples[id] = r.buf; if (id === "right") r.rightKey = bk; if (id === "tright") r.trightKey = bk; r.phase = "flash"; r.flashUntil = now + 1200; buzz(110); }
+                if (br > (easy ? (r.fails >= 2 ? 0.25 : 0.5) : 1)) { r.samples[id] = r.buf; if (id === "right") r.rightKey = bk; if (id === "tright") r.trightKey = bk; r.phase = "flash"; r.flashUntil = now + 1200; buzz(110); }
                 else { r.fails++; r.phase = "brief"; r.phaseStart = now; r.buf = []; }
               } else enter("rest");
             }
@@ -198,7 +200,7 @@ export default function Calibrate() {
 
   if (step === "intro" && prev === undefined && !first) return <main className="min-h-dvh" />;
   if (step === "intro" && !first && prev) {
-    const ok = (m: Id) => { const d = m === "frown" ? prev.dash.duck : m === "right" ? prev.dash.right : m === "left" ? prev.dash.left : m === "tright" ? prev.dash.tright : m === "tleft" ? prev.dash.tleft : m === "pucker" || m === "close" ? prev.flight[m] : prev.flight[m] ?? prev.dash.jump; return d ? (d.detectable ? "ready" : "weak") : "none"; };
+    const ok = (m: Id) => { const d = m === "frown" ? prev.dash.duck : m === "right" ? prev.dash.right : m === "left" ? prev.dash.left : m === "tright" ? prev.dash.tright : m === "tleft" ? prev.dash.tleft : m === "tout" ? prev.dash.tout : m === "pucker" || m === "close" ? prev.flight[m] : prev.flight[m] ?? prev.dash.jump; return d ? (d.detectable ? "ready" : "weak") : "none"; };
     const choose = (m: Id) => { const r = S.current; r.one = m; r.redo = true; r.lockRight = m === "right" ? (prev.dash.left ? prev.dash.right?.key ?? null : null) : m === "left" ? prev.dash.right?.key ?? null : null; r.lockTRight = m === "tright" ? (prev.dash.tleft ? prev.dash.tright?.key ?? null : null) : m === "tleft" ? prev.dash.tright?.key ?? null : null; setOne(m); startCam("align"); };
     return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))]">{videoEl}
@@ -239,7 +241,7 @@ export default function Calibrate() {
 
   if (step === "review") {
     const b = built; const st = (m: Id) => b?.status[m] ?? "skipped";
-    const flightOk = (["smile", "brow", "pucker", "close"] as Id[]).some(m => st(m) === "ok"), dashOk = (["smile", "brow", "frown", "right", "left"] as Id[]).every(m => st(m) === "ok");
+    const flightOk = (["smile", "brow", "pucker", "close"] as Id[]).some(m => st(m) === "ok"), dashOk = (["smile", "brow", "frown", "right", "left"] as Id[]).every(m => st(m) === "ok"), sliceOk = (["tright", "tleft", "tout"] as Id[]).every(m => st(m) === "ok");
     if (one) { const good = st(one) === "ok"; return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))]">{videoEl}
         {dots}<h1 className="mt-5 font-display text-3xl">{COPY[one].title}</h1>
@@ -259,9 +261,10 @@ export default function Calibrate() {
           <span className={`rounded-full px-3 py-1 text-xs ${st(m) === "ok" ? "bg-sage/40" : "bg-gold/30"}`}>{st(m) === "ok" ? "Ready" : st(m) === "weak" ? "Not detected" : "Skipped"}</span>
           <button className="text-sm text-teal underline" onClick={() => { S.current.redo = true; startCam(m); }}>Redo</button></li>)}</ul>
         <div className="mt-4 grid gap-2 text-sm"><p className={`rounded-xl p-3 ${flightOk ? "bg-sage/25" : "bg-gold/25"}`}>Mirror Flight: {flightOk ? "ready" : "needs at least one movement"}</p>
-          <p className={`rounded-xl p-3 ${dashOk ? "bg-sage/25" : "bg-gold/25"}`}>Mirror Dash: {dashOk ? "ready" : "not ready yet"}</p></div>
+          <p className={`rounded-xl p-3 ${dashOk ? "bg-sage/25" : "bg-gold/25"}`}>Mirror Dash: {dashOk ? "ready" : "not ready yet"}</p>
+          <p className={`rounded-xl p-3 ${sliceOk ? "bg-sage/25" : "bg-gold/25"}`}>Fruit Slice: {sliceOk ? "ready" : "needs all three tongue movements"}</p></div>
         {err && <p role="alert" className="mt-3 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
-        <div className="mt-auto pt-6"><button className="btn-primary w-full min-h-[60px] text-lg" disabled={saving || saved || !(flightOk || dashOk)} onClick={save}>{saved ? "Saved ✓" : saving ? "Saving…" : "Save calibration"}</button>
+        <div className="mt-auto pt-6"><button className="btn-primary w-full min-h-[60px] text-lg" disabled={saving || saved || !(flightOk || dashOk || sliceOk)} onClick={save}>{saved ? "Saved ✓" : saving ? "Saving…" : "Save calibration"}</button>
           <button className="btn-quiet mt-3 w-full" disabled={saving} onClick={() => goBack()}>Back</button></div>
       </main>);
   }
