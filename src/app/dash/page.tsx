@@ -9,10 +9,7 @@ import { POLICY_VERSION } from "@/lib/onboarding";
 // ---------- movements ----------
 type M = "jump" | "fly" | "duck" | "right" | "left";
 const MOVES: M[] = ["jump", "fly", "duck", "right", "left"];
-type SK = "smile" | "brow" | "frown" | "sideA" | "sideB" | "tonA" | "tonB";
-type Side = "pucker" | "tongue";
-let SIDE: Side = "pucker";
-const applySide = (side: Side) => { SIDE = side; const t = side === "tongue", W = t ? "Tongue" : "Pucker"; INFO.right.name = `${W} to your right`; INFO.left.name = `${W} to your left`; INFO.right.cue = `${W} to your right to move right`; INFO.left.cue = `${W} to your left to move left`; const tip = t ? "Stick your tongue out and point it toward your " : "Round your lips like “ooo” and nudge them toward your "; INFO.right.tip = tip + "right cheek."; INFO.left.tip = tip + "left cheek."; SHORT.right = `${W} →\nRight`; SHORT.left = `← ${W}\nLeft`; };
+type SK = "smile" | "brow" | "frown" | "sideA" | "sideB";
 const INFO: Record<M, { name: string; action: string; cue: string; tip: string; icon: string }> = {
   jump: { name: "Smile", action: "Jump", cue: "Smile to jump", tip: "A closed-mouth smile or a smile with teeth. Never force it.", icon: "😊" },
   fly: { name: "Eyebrow raise", action: "Jetpack", cue: "Raise your eyebrows to fly", tip: "Lift them gently, as if mildly surprised. Hold to keep flying.", icon: "🤨" },
@@ -22,11 +19,10 @@ const INFO: Record<M, { name: string; action: string; cue: string; tip: string; 
 };
 const SHORT: Record<M, string> = { jump: "Smile\nJump", fly: "Brows\nFly", duck: "Frown\nDuck", right: "Pucker →\nRight", left: "← Pucker\nLeft" };
 type Move = { key: SK; nm: number; std: number; peak: number; range: number; detectable: boolean };
-type Cal = Partial<Record<M | "tright" | "tleft", Move>>;
-const withSide = (c: Cal, side: Side): Cal => side === "tongue" ? { ...c, right: c.tright, left: c.tleft } : c;
-const MIN: Record<SK, number> = { smile: .015, brow: .015, frown: .04, sideA: .08, sideB: .08, tonA: .03, tonB: .03 };
-const sigs = (v: Vals): Record<SK, number> => ({ smile: v.smile, brow: v.brow, frown: v.frown, sideA: v.sideA - 0.6 * v.sideB + 0.3 * v.pucker, sideB: v.sideB - 0.6 * v.sideA + 0.3 * v.pucker, tonA: v.tonA, tonB: v.tonB });
-const SKS: SK[] = ["smile", "brow", "frown", "sideA", "sideB", "tonA", "tonB"];
+type Cal = Partial<Record<M, Move>>;
+const MIN: Record<SK, number> = { smile: .015, brow: .015, frown: .04, sideA: .08, sideB: .08 };
+const sigs = (v: Vals): Record<SK, number> => ({ smile: v.smile, brow: v.brow, frown: v.frown, sideA: v.sideA - 0.6 * v.sideB + 0.3 * v.pucker, sideB: v.sideB - 0.6 * v.sideA + 0.3 * v.pucker });
+const SKS: SK[] = ["smile", "brow", "frown", "sideA", "sideB"];
 const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / (a.length || 1);
 const sd = (a: number[]) => { const m = mean(a); return Math.sqrt(mean(a.map(x => (x - m) ** 2))); };
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
@@ -39,22 +35,22 @@ const STARTS = [{ v: 10, n: "Slow" }, { v: 14, n: "Medium" }, { v: 18, n: "Quick
 const RAMPS = [{ v: 1.5, n: "A little" }, { v: 2, n: "Steadily" }, { v: 2.6, n: "A lot" }];
 const GAINS = [1, 1.3, 1.7, 2.2, 3];
 type En = { jump: boolean; duck: boolean; fly: boolean; lanes: boolean };
-type Settings = { len: number; start: number; ramp: number; hints: boolean; haptics: boolean; level: 0 | 1 | 2 | 3; en: En; side: Side; mode: "chase" | "hearts" };
+type Settings = { len: number; start: number; ramp: number; hints: boolean; haptics: boolean; level: 0 | 1 | 2 | 3; en: En; mode: "chase" | "hearts" };
 const ALL: En = { jump: true, duck: true, fly: true, lanes: true };
 const LEVELS: { n: 1 | 2 | 3; sub: string; en: En }[] = [
   { n: 1, sub: "One lane · smile only", en: { jump: true, duck: false, fly: false, lanes: false } },
   { n: 2, sub: "One lane · smile and frown", en: { jump: true, duck: true, fly: false, lanes: false } },
-  { n: 3, sub: "Three lanes · pucker or tongue right and left, smile, frown, eyebrows", en: ALL },
+  { n: 3, sub: "Three lanes · pucker right and left, smile, frown, eyebrows", en: ALL },
 ];
 const needed = (en: En): M[] => { const a: M[] = []; if (en.jump) a.push("jump"); if (en.fly) a.push("fly"); if (en.duck) a.push("duck"); if (en.lanes) a.push("right", "left"); return a; };
 const enOf = (en: En, m: M) => (m === "right" || m === "left" ? en.lanes : en[m]);
-const calOk = (c: Cal | null, en: En, side: Side = "pucker") => !!c && needed(en).every(m => (side === "tongue" ? withSide(c, side) : c)[m]?.detectable);
+const calOk = (c: Cal | null, en: En) => !!c && needed(en).every(m => c[m]?.detectable);
 const levelOf = (en: En): 0 | 1 | 2 | 3 => LEVELS.find(L => (Object.keys(L.en) as (keyof En)[]).every(k => L.en[k] === en[k]))?.n ?? 0;
-const moveText = (en: En) => { const a: string[] = []; if (en.jump) a.push("smile to jump"); if (en.fly) a.push("raise your eyebrows to fly"); if (en.duck) a.push("frown to duck"); if (en.lanes) a.push(`${SIDE === "tongue" ? "point your tongue" : "pucker"} left or right to change lanes`); return a.length > 1 ? a.slice(0, -1).join(", ") + (a.length > 2 ? "," : "") + " and " + a[a.length - 1] : a[0]; };
+const moveText = (en: En) => { const a: string[] = []; if (en.jump) a.push("smile to jump"); if (en.fly) a.push("raise your eyebrows to fly"); if (en.duck) a.push("frown to duck"); if (en.lanes) a.push("pucker left or right to change lanes"); return a.length > 1 ? a.slice(0, -1).join(", ") + (a.length > 2 ? "," : "") + " and " + a[a.length - 1] : a[0]; };
 const levelLabel = (st: Settings) => (st.level ? `Level ${st.level} · ${LEVELS[st.level - 1].sub}` : "Your own mix");
-const DEF: Settings = { len: 90, start: 14, ramp: 2, hints: true, haptics: true, level: 3, en: ALL, side: "pucker", mode: "hearts" };
+const DEF: Settings = { len: 90, start: 14, ramp: 2, hints: true, haptics: true, level: 3, en: ALL, mode: "hearts" };
 const SKEY = "smilequest.dash.settings";
-function loadSettings(): Settings { try { const j = JSON.parse(localStorage.getItem(SKEY) || "null"); if (j) { const en = { ...ALL, ...(j.en ?? {}) }; return { ...DEF, ...j, mode: j.mode === "chase" ? "chase" : "hearts", side: j.side === "tongue" ? "tongue" : "pucker", en: needed(en).length ? en : ALL, len: LENS.includes(j.len) ? j.len : DEF.len }; } } catch { /* ignore */ } return DEF; }
+function loadSettings(): Settings { try { const j = JSON.parse(localStorage.getItem(SKEY) || "null"); if (j) { const en = { ...ALL, ...(j.en ?? {}) }; return { ...DEF, ...j, mode: j.mode === "chase" ? "chase" : "hearts", en: needed(en).length ? en : ALL, len: LENS.includes(j.len) ? j.len : DEF.len }; } } catch { /* ignore */ } return DEF; }
 function saveSettings(s: Settings) { try { localStorage.setItem(SKEY, JSON.stringify(s)); } catch { /* ignore */ } }
 
 // ---------- world ----------
@@ -108,7 +104,7 @@ function tutSteps(en: En): TutStep[] {
   const a: TutStep[] = [];
   if (en.jump) a.push({ kind: "hurdle", n: 1, text: "Smile to jump" });
   if (en.duck) a.push({ kind: "bar", n: 1, text: "Frown to duck" });
-  if (en.lanes) a.push({ kind: "wall", n: 1, text: SIDE === "tongue" ? "Point your tongue left or right to change lanes" : "Pucker left or right to change lanes" });
+  if (en.lanes) a.push({ kind: "wall", n: 1, text: "Pucker left or right to change lanes" });
   if (en.fly) a.push({ kind: "full", n: 1, text: "Raise your eyebrows to fly" });
   if (en.jump) a.push({ kind: "hurdle", n: 3, text: "Keep smiling to stay up" });
   if (en.duck) a.push({ kind: "bar", n: 3, text: "Keep frowning to stay low" });
@@ -297,7 +293,7 @@ export default function Dash() {
   const [view, setView] = useState<"loading" | "hub" | "clearance" | "ready" | "settings" | "calibrate" | "stats" | "play" | "results">("loading");
   const [cal, setCal] = useState<Cal | null>(null), calRef = useRef<Cal | null>(null);
   const [clear, setClear] = useState(false), [agree, setAgree] = useState(false);
-  const [st, setSt] = useState<Settings>(DEF), stRef = useRef(st); stRef.current = st; applySide(st.side); calRef.current = cal ? withSide(cal, st.side) : null;
+  const [st, setSt] = useState<Settings>(DEF), stRef = useRef(st); stRef.current = st; calRef.current = cal;
   const [msg, setMsg] = useState<string | null>(null), [busy, setBusy] = useState(false), [preview, setPreview] = useState(true), [gainUi, setGainUi] = useState(1.3);
   const [box, setBox] = useState({ w: 360, h: 640 });
   const [ui, setUi] = useState({ stage: "ready" as "ready" | "play" | "done", ready: 6, left: 90, dist: 0, coins: 0, mul: 1, adjust: false, paused: false, hint: "", lev: z5() as Record<M, number>, on: { jump: false, fly: false, duck: false, right: false, left: false } as Record<M, boolean>, stumble: false, points: 0, lives: 3, close: false, tut: -1, tutText: "", tutTotal: 0 });
@@ -308,14 +304,14 @@ export default function Dash() {
   const [calNeutral, setCalNeutral] = useState<Record<SK, { mean: number; std: number }> | null>(null);
   const [calMoves, setCalMoves] = useState<Partial<Record<M, Move>>>({}), [calSaving, setCalSaving] = useState(false);
   const [calQ, setCalQ] = useState<{ face: boolean; size: boolean; light: boolean } | null>(null);
-  const hasCal = calOk(cal, st.en, st.side); const acBase = useRef<ReturnType<typeof acFromSaved>>(null); const hubCv = useRef<HTMLCanvasElement>(null); const [hubBox, setHubBox] = useState({ w: 360, h: 640 });
+  const hasCal = calOk(cal, st.en); const acBase = useRef<ReturnType<typeof acFromSaved>>(null); const hubCv = useRef<HTMLCanvasElement>(null); const [hubBox, setHubBox] = useState({ w: 360, h: 640 });
 
   useEffect(() => { (async () => {
     const sb = supabase(); const { data: { user } } = await sb.auth.getUser();
     if (!user) { location.href = "/"; return; }
     setSt(loadSettings());
     const { data: c } = await sb.from("dash_calibration").select("summary").maybeSingle();
-    const mv = c?.summary?.moves, okCal = calOk(mv ?? null, loadSettings().en, loadSettings().side); if (mv) setCal(mv as Cal); acBase.current = acFromSaved(c?.summary?.ac0);
+    const mv = c?.summary?.moves, okCal = calOk(mv ?? null, loadSettings().en); if (mv) setCal(mv as Cal); acBase.current = acFromSaved(c?.summary?.ac0);
     const { data: cl } = await sb.from("consent_records").select("id").eq("kind", "exercise_clearance").eq("granted", true).limit(1);
     setClear(!!cl?.length); setView(new URLSearchParams(location.search).get("ready") === "1" && okCal ? "ready" : "hub");
   })(); return () => stop(); }, []);
@@ -479,7 +475,7 @@ export default function Dash() {
           if (r.kind === "hurdle") hint = r.hold ? "Keep smiling" : "Smile to jump";
           else if (r.kind === "bar") hint = r.hold ? "Keep frowning" : "Frown to duck";
           else if (r.kind === "full") hint = "Raise your eyebrows to fly";
-          else { const free = [0, 1, 2].filter(l => !r.lanes.includes(l)).sort((a, b) => Math.abs(a - s.lane) - Math.abs(b - s.lane))[0]; hint = free == null ? "Raise your eyebrows to fly" : free > s.lane ? INFO.right.name : INFO.left.name; }
+          else { const free = [0, 1, 2].filter(l => !r.lanes.includes(l)).sort((a, b) => Math.abs(a - s.lane) - Math.abs(b - s.lane))[0]; hint = free == null ? "Raise your eyebrows to fly" : free > s.lane ? "Pucker to your right" : "Pucker to your left"; }
         }
       }
       if (s.tut >= 0) hint = s.tut >= s.tutSteps.length ? "Tutorial complete" : s.tutFlash || s.tutSteps[s.tut].text;
@@ -592,13 +588,10 @@ export default function Dash() {
         <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">1. Level</h2>
           <div className="mt-3 grid gap-2" role="radiogroup" aria-label="Level">{LEVELS.map(L => <button key={L.n} role="radio" aria-checked={st.level === L.n} onClick={() => update({ level: L.n, en: L.en })} className={`rounded-2xl border p-3 text-left transition ${st.level === L.n ? "border-teal bg-teal/10" : "border-navy/15"}`}><b>Level {L.n}</b><br /><span className="text-sm text-navy/70">{L.sub}</span></button>)}</div>
           <h3 className="mt-4 text-sm font-medium">Or choose your own movements</h3>
-          <div className="mt-2 grid gap-2">{([["jump", "Smile", "Jump over low stones"], ["duck", "Frown", "Duck under bars"], ["fly", "Eyebrows", "Fly over walls"], ["lanes", "Lane changes", "Move between three lanes"]] as [keyof En, string, string][]).map(([k, n, d]) =>
+          <div className="mt-2 grid gap-2">{([["jump", "Smile", "Jump over low stones"], ["duck", "Frown", "Duck under bars"], ["fly", "Eyebrows", "Fly over walls"], ["lanes", "Pucker right and left", "Change lanes (turns on three lanes)"]] as [keyof En, string, string][]).map(([k, n, d]) =>
             <label key={k} className="flex items-center justify-between gap-4 rounded-2xl bg-mist/50 p-3"><span><b>{n}</b><br /><span className="text-xs text-navy/60">{d}</span></span>
               <input type="checkbox" className="h-7 w-7 accent-teal" checked={st.en[k]} onChange={e => { const en = { ...st.en, [k]: e.target.checked }; if (!needed(en).length) return; update({ en, level: levelOf(en) }); }} /></label>)}</div>
-          {st.en.lanes && <><h3 className="mt-4 text-sm font-medium">Change lanes with</h3>
-            <div className="mt-2 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Change lanes with">{([["pucker", "Pucker", "Right and left"], ["tongue", "Tongue", "Tongue out, right and left"]] as [Side, string, string][]).map(([k, n, d]) => <button key={k} role="radio" aria-checked={st.side === k} onClick={() => update({ side: k })} className={`rounded-2xl border p-3 text-left transition ${st.side === k ? "border-teal bg-teal/10" : "border-navy/15"}`}><b>{n}</b><br /><span className="text-xs text-navy/70">{d}</span></button>)}</div>
-            {st.side === "tongue" && <p className="mt-2 text-xs text-navy/60">The camera can tell when your tongue is out and your jaw shifts, but not exactly where the tongue points. We’ll check how well it works for you in calibration.</p>}</>}
-          {!calOk(cal, st.en, st.side) && <p className="mt-3 text-xs text-navy/60">Some of these movements aren’t calibrated yet. We’ll set them up when you press Play.</p>}</section>
+          {!calOk(cal, st.en) && <p className="mt-3 text-xs text-navy/60">Some of these movements aren’t calibrated yet. We’ll set them up when you press Play.</p>}</section>
         <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">2. Game mode</h2>
           <div className="mt-3 grid gap-2" role="radiogroup" aria-label="Game mode">{([["chase", "Mode 1: Bear chase", "The bear follows you. One stumble brings it close. Stumble again before it falls back and it catches you."], ["hearts", "Mode 2: Three hearts", "You can stumble up to three times. The bear catches up on the third."]] as ["chase" | "hearts", string, string][]).map(([k, n, d]) => <button key={k} role="radio" aria-checked={st.mode === k} onClick={() => update({ mode: k })} className={`rounded-2xl border p-3 text-left transition ${st.mode === k ? "border-teal bg-teal/10" : "border-navy/15"}`}><b>{n}</b><br /><span className="text-sm text-navy/70">{d}</span></button>)}</div></section>
                 <section className="mt-3 rounded-3xl bg-paper p-5 shadow-soft"><h2 className="font-display text-xl">3. Run length</h2>
