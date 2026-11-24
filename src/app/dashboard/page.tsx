@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { dailyDue, dailyUrl } from "@/lib/daily";
 import { PATIENT_TEST_MODE } from "@/lib/config";
 import ThemeToggle from "@/components/ThemeToggle";
 import { GAME_NAMES, exerciseReady, loadContext, moveLabel, type Plan, type Sess } from "@/lib/workflow";
@@ -48,6 +49,7 @@ function FullDashboard() {
 }
 
 function TestHome() {
+  const [due, setDue] = useState(false);
   const [ok, setOk] = useState(false), [name, setName] = useState(""), [cal, setCal] = useState<{ flight: boolean; dash: boolean }>({ flight: false, dash: false });
   useEffect(() => { (async () => {
     const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) { location.href = "/"; return; }
@@ -61,6 +63,7 @@ function TestHome() {
     let skipped = false; try { skipped = sessionStorage.getItem("sq-skipcal") === "1"; } catch { /* ignore */ }
     if (!flightReady && !dashReady && !skipped) { location.href = "/calibrate?first=1&next=/dashboard"; return; }
     setCal({ flight: flightReady, dash: dashReady }); setOk(true);
+    setDue(await dailyDue());
   })(); }, []);
   async function logout() { await supabase().auth.signOut(); location.href = "/"; }
   if (!ok) return <main className="grid min-h-dvh place-items-center text-navy/60">Loading…</main>;
@@ -69,6 +72,7 @@ function TestHome() {
     <main className="mx-auto min-h-dvh max-w-md px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))]">
       <div className="flex items-center justify-between gap-3"><p className="text-xs uppercase tracking-[.3em] text-teal">SmileQuest</p><ThemeToggle /></div>
       <h1 className="mt-6 font-display text-4xl leading-tight">{name ? `Hi, ${name}.` : "Welcome back."}</h1>
+      {due && any && <a href={dailyUrl("/dashboard")} className="mt-5 block rounded-2xl border border-teal/40 bg-teal/10 p-4 shadow-soft"><b>Daily recalibration</b><br /><span className="text-sm text-navy/70">About 3 minutes. Do it before you play today.</span></a>}
       <h2 className="mt-8 text-xs uppercase tracking-[.25em] text-navy/60">Pick a game</h2>
       <a href="/flyer" className="mt-3 block overflow-hidden rounded-3xl border border-navy/10 bg-paper shadow-soft transition active:scale-[.99]">
         <svg viewBox="0 0 320 130" className="block w-full" aria-hidden><defs><linearGradient id="fg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="rgb(var(--lav))" /><stop offset="1" stopColor="rgb(var(--ivory))" /></linearGradient></defs><rect width="320" height="130" fill="url(#fg)" />
