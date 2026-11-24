@@ -24,7 +24,7 @@ const SHORT: Record<M, string> = { jump: "Smile\nJump", fly: "Brows\nFly", duck:
 type Move = { key: SK; nm: number; std: number; peak: number; range: number; detectable: boolean };
 type Cal = Partial<Record<M | "tright" | "tleft", Move>>;
 const withSide = (c: Cal, side: Side): Cal => side === "tongue" ? { ...c, right: c.tright, left: c.tleft } : c;
-const MIN: Record<SK, number> = { smile: .015, brow: .015, frown: .04, sideA: .08, sideB: .08, tonA: .04, tonB: .04 };
+const MIN: Record<SK, number> = { smile: .015, brow: .015, frown: .04, sideA: .08, sideB: .08, tonA: .03, tonB: .03 };
 const sigs = (v: Vals): Record<SK, number> => ({ smile: v.smile, brow: v.brow, frown: v.frown, sideA: v.sideA - 0.6 * v.sideB + 0.3 * v.pucker, sideB: v.sideB - 0.6 * v.sideA + 0.3 * v.pucker, tonA: v.tonA, tonB: v.tonB });
 const SKS: SK[] = ["smile", "brow", "frown", "sideA", "sideB", "tonA", "tonB"];
 const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / (a.length || 1);
