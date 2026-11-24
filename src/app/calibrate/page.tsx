@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { createTracker, type Frame, type Vals } from "@/lib/tracking";
 import { meanAC, acFromSaved, type AC } from "@/lib/commissure";
+import { VIDEO_CONSENT_VERSION } from "@/lib/daily";
 
 // ---------- what we measure ----------
 type Id = "smile" | "brow" | "frown" | "pucker" | "right" | "left" | "tright" | "tleft" | "tout" | "close";
@@ -60,17 +61,74 @@ export default function Calibrate() {
   type Prev = { flight: Record<string, any>; dash: Record<string, any>; neutral: Record<string, any>; ac0: AC | null };
   const [prev, setPrev] = useState<Prev | null | undefined>(undefined), [one, setOne] = useState<Id | null>(null);
   const [first, setFirst] = useState(false); useEffect(() => { setFirst(new URLSearchParams(location.search).get("first") === "1"); }, []);
+  const [daily, setDaily] = useState(false); useEffect(() => { setDaily(new URLSearchParams(location.search).get("daily") === "1"); }, []);
+  // ---- daily recalibration settings + optional video for the care team ----
+  type RS = { daily: boolean; video: boolean; consentAt: string | null; ok: boolean };
+  const [rs, setRs] = useState<RS>({ daily: true, video: false, consentAt: null, ok: true }), [rsMsg, setRsMsg] = useState<string | null>(null), [consentOpen, setConsentOpen] = useState(false), [nVideos, setNVideos] = useState(0), [confirmDel, setConfirmDel] = useState(false);
+  const rec = useRef<{ mr: MediaRecorder; chunks: Blob[]; t0: number; mime: string } | null>(null), parts = useRef<{ blob: Blob; seconds: number }[]>([]), upN = useRef(0), sessId = useRef("");
+  const [recOn, setRecOn] = useState(false), [vid, setVid] = useState<"idle" | "uploading" | "done" | "failed">("idle"), [nParts, setNParts] = useState(0);
+  useEffect(() => { (async () => {
+    const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) return;
+    const r = await sb.from("recal_settings").select("daily,video,video_consent_at").maybeSingle();
+    if (r.error) { setRs(x => ({ ...x, ok: false })); return; }
+    const d: any = r.data; if (d) setRs({ daily: !!d.daily, video: !!d.video, consentAt: d.video_consent_at ?? null, ok: true });
+    const c = await sb.from("calibration_videos").select("id", { count: "exact", head: true }); setNVideos(c.count ?? 0);
+  })(); }, []);
+  async function saveRs(p: Partial<RS>) {
+    const n = { ...rs, ...p }; setRs(n); const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) return;
+    const { error } = await sb.from("recal_settings").upsert({ user_id: user.id, daily: n.daily, video: n.video, video_consent_at: n.consentAt, video_consent_version: n.consentAt ? VIDEO_CONSENT_VERSION : null, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+    setRsMsg(error ? `Couldn’t save this setting: ${error.message}. (Run the 0011 database step in Supabase.)` : null);
+  }
+  async function deleteVideos() {
+    const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) return;
+    const { data } = await sb.from("calibration_videos").select("path"); const paths = ((data as any[]) ?? []).map(x => x.path as string);
+    if (paths.length) { const r = await sb.storage.from("calibration-videos").remove(paths); if (r.error) { setRsMsg(`Couldn’t delete: ${r.error.message}`); return; } }
+    await sb.from("calibration_videos").delete().eq("user_id", user.id); setNVideos(0); setConfirmDel(false); setRsMsg("Your recordings were deleted.");
+  }
+  function startRec() {
+    if (!(rs.video && rs.consentAt) || S.current.one || !stream.current || rec.current || typeof MediaRecorder === "undefined") return;
+    const mime = ["video/webm;codecs=vp8", "video/webm", "video/mp4"].find(t => { try { return MediaRecorder.isTypeSupported(t); } catch { return false; } }) ?? "";
+    try {
+      const mr = new MediaRecorder(stream.current, { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: 900000 }), chunks: Blob[] = [];
+      mr.ondataavailable = e => { if (e.data.size) chunks.push(e.data); }; mr.start(1000);
+      rec.current = { mr, chunks, t0: Date.now(), mime: mr.mimeType || mime || "video/webm" }; setRecOn(true);
+    } catch { setRecOn(false); }
+  }
+  function endRec(keep: boolean): Promise<void> {
+    const r = rec.current; rec.current = null; setRecOn(false); if (!r) return Promise.resolve();
+    return new Promise(res => {
+      r.mr.onstop = () => { if (keep && r.chunks.length) { parts.current.push({ blob: new Blob(r.chunks, { type: r.mime }), seconds: Math.round((Date.now() - r.t0) / 1000) }); setNParts(parts.current.length); } res(); };
+      try { if (r.mr.state !== "inactive") r.mr.stop(); else res(); } catch { res(); }
+    });
+  }
+  async function uploadParts(): Promise<boolean> {
+    const ps = parts.current; if (!ps.length || upN.current >= ps.length) { setVid("done"); return true; }
+    setVid("uploading"); setErr(null);
+    try {
+      const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) return false;
+      if (!sessId.current) sessId.current = new Date().toISOString().replace(/[:.]/g, "-");
+      for (let i = upN.current; i < ps.length; i++) {
+        const p = ps[i], base = (p.blob.type || "video/webm").split(";")[0], ext = base.includes("mp4") ? "mp4" : "webm", path = `${user.id}/${sessId.current}-p${i + 1}.${ext}`;
+        const up = await sb.storage.from("calibration-videos").upload(path, p.blob, { contentType: base, upsert: true }); if (up.error) throw up.error;
+        const ins = await sb.from("calibration_videos").insert({ user_id: user.id, path, mime: base, size_bytes: p.blob.size, duration_seconds: p.seconds, kind: daily ? "daily" : "recalibration", app_version: "m11", device: navigator.userAgent.slice(0, 200),
+          summary: { session: sessId.current, part: i + 1, parts: ps.length, full: true, status: built?.status ?? null, flight: built?.flight ?? null, dash: built?.dash ?? null, ac0: S.current.ac0 ?? prev?.ac0 ?? null } });
+        if (ins.error) throw ins.error; upN.current = i + 1;
+      }
+      setVid("done"); setNVideos(n => n + ps.length); return true;
+    } catch (e: any) { setVid("failed"); setErr(`Your calibration saved, but the video didn’t upload: ${e?.message ?? e}. Check your connection and try again. (If this keeps happening, run the 0011 database step in Supabase.)`); return false; }
+  }
+
 
   useEffect(() => { (async () => { const { data: { user } } = await supabase().auth.getUser(); if (!user) { location.href = "/"; return; }
     const sb = supabase(); const a = await sb.from("calibration_profiles").select("summary").eq("user_id", user.id).order("created_at", { ascending: false }).limit(1).maybeSingle(); const b = await sb.from("dash_calibration").select("summary").eq("user_id", user.id).maybeSingle();
     const fl = (a.data as any)?.summary, da = (b.data as any)?.summary;
     setPrev(fl || da ? { flight: fl?.moves ?? {}, dash: da?.moves ?? {}, neutral: fl?.neutral ?? {}, ac0: acFromSaved(fl?.ac0) ?? acFromSaved(da?.ac0) } : null); })(); return () => stop(); }, []);
-  function stop() { tracker.current?.stop(); tracker.current = null; stream.current?.getTracks().forEach(t => t.stop()); stream.current = null; latest.current = null; }
+  function stop() { if (rec.current) void endRec(false); tracker.current?.stop(); tracker.current = null; stream.current?.getTracks().forEach(t => t.stop()); stream.current = null; latest.current = null; }
   function nextUrl() { const n = new URLSearchParams(location.search).get("next"); return n && n.startsWith("/") && !n.startsWith("//") ? n : "/dashboard"; }
 
   function enter(s: Step) {
     const r = S.current; r.step = s; r.enteredAt = performance.now(); r.phase = "brief"; r.phaseStart = performance.now(); r.lostAt = 0; r.fails = 0; r.skipBrief = false; r.over = 0; r.buf = []; r.progress = 0; r.weakSince = 0; r.restBuf = []; r.restMs = 0; r.flashUntil = 0;
-    if (s === "review") { S.current.redo = false; setBuilt(build()); stop(); setCam("off"); }
+    if (s === "review") { S.current.redo = false; setBuilt(build()); void endRec(true); stop(); setCam("off"); }
     setStep(s);
   }
   function goBack() {
@@ -88,7 +146,7 @@ export default function Calibrate() {
       stream.current = s; s.getVideoTracks()[0].onended = () => { setCam("off"); setErr("The camera was interrupted. Tap Start camera to resume."); };
       const v = video.current!; v.srcObject = s; await v.play();
       tracker.current = await createTracker(v, f => { latest.current = f; });
-      setCam("on"); enter(goTo);
+      setCam("on"); if (goTo === "align") { parts.current = []; upN.current = 0; sessId.current = ""; setNParts(0); setVid("idle"); } startRec(); enter(goTo);
     } catch (e: any) { stop(); setCam("off"); setErr(e?.name === "NotAllowedError" ? "Camera access is blocked. Allow it in your browser’s site settings (the lock icon by the address), then try again." : `Couldn’t start the camera: ${e?.message ?? e}`); }
   }
 
@@ -185,12 +243,14 @@ export default function Calibrate() {
     const sb = supabase(); const { data: { user } } = await sb.auth.getUser(); if (!user) { location.href = "/"; return; }
     const fm = { ...(one ? prev?.flight : {}), ...built.flight }, dm = { ...(one ? prev?.dash : {}), ...built.dash }, nm = { ...(one ? prev?.neutral : {}), ...built.neutral };
     const ac0 = S.current.ac0 ?? prev?.ac0 ?? null;
-    const e1 = (await sb.from("calibration_profiles").insert({ user_id: user.id, summary: { version: 2, neutral: nm, moves: fm, ac0, swapLR: false, note: "Camera-derived estimates in face-size-normalised units; not clinical measurements." } })).error;
+    const e1 = (await sb.from("calibration_profiles").insert({ user_id: user.id, summary: { version: 2, full: !one, neutral: nm, moves: fm, ac0, swapLR: false, note: "Camera-derived estimates in face-size-normalised units; not clinical measurements." } })).error;
     if (e1) { setSaving(false); setErr(`Couldn’t save: ${e1.message}`); return; }
     const e2 = (await sb.from("dash_calibration").upsert({ user_id: user.id, summary: { version: 1, moves: dm, ac0, note: "Camera-derived estimates; not clinical measurements." }, updated_at: new Date().toISOString() }, { onConflict: "user_id" })).error;
     setSaving(false);
     if (e2) { setErr(`Your main calibration saved, but Mirror Dash’s didn’t: ${e2.message}. (Run the 0007 database step in Supabase.)`); return; }
-    buzz([100, 80, 100]); setSaved(true); setTimeout(() => { location.href = nextUrl(); }, 900);
+    buzz([100, 80, 100]); setSaved(true);
+    if (!one && parts.current.length) { const ok = await uploadParts(); if (!ok) return; }
+    setTimeout(() => { location.href = nextUrl(); }, 900);
   }
 
   const idx = ORDER.indexOf(step), total = ORDER.length - 2; const isMove = (MOVES as string[]).includes(step); const c = isMove ? COPY[step as Id] : null;
@@ -198,8 +258,22 @@ export default function Calibrate() {
   const dots = <div className="flex gap-1" role="progressbar" aria-valuemin={1} aria-valuemax={stotal} aria-valuenow={Math.min(stotal, Math.max(1, sidx))} aria-label={`Step ${Math.max(1, sidx)} of ${stotal}`}>{seq.map((s, n) => <div key={s} className={`h-1 flex-1 rounded-full ${n < sidx ? "bg-teal" : "bg-navy/15"}`} />)}</div>;
   const videoEl = <video ref={video} playsInline muted className="pointer-events-none fixed left-0 top-0 h-1 w-1 opacity-[0.02]" aria-hidden />;
 
+  const settingsBlock = rs.ok ? (
+    <section className="mt-5 w-full rounded-2xl bg-paper p-4 text-left shadow-soft"><h2 className="font-display text-lg">Daily recalibration</h2>
+      <label className="mt-3 flex items-center justify-between gap-4 text-sm"><span><b>Recalibrate every day</b><br /><span className="text-xs text-navy/60">The games ask you to recalibrate once a day so the measurements stay accurate.</span></span>
+        <input type="checkbox" className="h-7 w-7 shrink-0 accent-teal" checked={rs.daily} onChange={e => saveRs({ daily: e.target.checked })} aria-label="Recalibrate every day" /></label>
+      <label className="mt-4 flex items-center justify-between gap-4 text-sm"><span><b>Save a video of my recalibration</b><br /><span className="text-xs text-navy/60">Records only the recalibration, never game play. Off unless you choose it.</span></span>
+        <input type="checkbox" className="h-7 w-7 shrink-0 accent-teal" checked={rs.video && !!rs.consentAt} onChange={e => { if (!e.target.checked) saveRs({ video: false }); else if (rs.consentAt) saveRs({ video: true }); else setConsentOpen(true); }} aria-label="Save a video of my recalibration" /></label>
+      {consentOpen && <div className="mt-3 rounded-xl bg-gold/20 p-3 text-xs text-navy/80" role="group" aria-label="Video consent"><b>Before you turn this on</b>
+        <p className="mt-1">Your recalibration will be recorded on video and uploaded to a private, secure account. The SmileQuest team can use it to check that the app’s measurements match how your face really moves.</p>
+        <p className="mt-1">The video shows your face, so it can identify you. Game play is never recorded. You can turn this off at any time and delete your recordings here.</p>
+        <div className="mt-3 grid grid-cols-2 gap-2"><button className="btn-primary min-h-[44px]" onClick={() => { setConsentOpen(false); saveRs({ video: true, consentAt: new Date().toISOString() }); }}>I agree</button><button className="btn-quiet min-h-[44px]" onClick={() => setConsentOpen(false)}>Not now</button></div></div>}
+      {nVideos > 0 && <div className="mt-3 text-xs text-navy/70">{nVideos} recording{nVideos === 1 ? "" : "s"} saved. {confirmDel ? <span>Delete them all? <button className="underline" onClick={deleteVideos}>Yes, delete</button> · <button className="underline" onClick={() => setConfirmDel(false)}>Cancel</button></span> : <button className="underline" onClick={() => setConfirmDel(true)}>Delete my recordings</button>}</div>}
+      {rsMsg && <p role="status" className="mt-2 text-xs text-navy/70">{rsMsg}</p>}
+    </section>) : null;
+
   if (step === "intro" && prev === undefined && !first) return <main className="min-h-dvh" />;
-  if (step === "intro" && !first && prev) {
+  if (step === "intro" && !first && !daily && prev) {
     const ok = (m: Id) => { const d = m === "frown" ? prev.dash.duck : m === "right" ? prev.dash.right : m === "left" ? prev.dash.left : m === "tright" ? prev.dash.tright : m === "tleft" ? prev.dash.tleft : m === "tout" ? prev.dash.tout : m === "pucker" || m === "close" ? prev.flight[m] : prev.flight[m] ?? prev.dash.jump; return d ? (d.detectable ? "ready" : "weak") : "none"; };
     const choose = (m: Id) => { const r = S.current; r.one = m; r.redo = true; r.lockRight = m === "right" ? (prev.dash.left ? prev.dash.right?.key ?? null : null) : m === "left" ? prev.dash.right?.key ?? null : null; r.lockTRight = m === "tright" ? (prev.dash.tleft ? prev.dash.tright?.key ?? null : null) : m === "tleft" ? prev.dash.tright?.key ?? null : null; setOne(m); startCam("align"); };
     return (
@@ -211,6 +285,7 @@ export default function Calibrate() {
           <Guide id={m} size={44} /><span className="flex-1"><b>{COPY[m].title}</b><br /><span className="text-xs text-navy/60">{off ? (m === "tleft" ? "Do tongue right first" : "Do pucker right first") : COPY[m].games}</span></span>
           <span className={`rounded-full px-3 py-1 text-xs ${s === "ready" ? "bg-sage/40" : "bg-gold/30"}`}>{s === "ready" ? "Ready" : s === "weak" ? "Weak" : "Not set"}</span></button></li>; })}</ul>
         {err && <p role="alert" className="mt-3 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
+        {settingsBlock}
         <div className="mt-auto pt-6"><button className="btn-quiet w-full" disabled={cam === "loading"} onClick={() => { S.current.one = null; S.current.lockRight = null; S.current.lockTRight = null; setOne(null); startCam("align"); }}>{cam === "loading" ? "Starting camera…" : "Recalibrate everything"}</button>
           <p className="mt-3 text-center text-xs text-navy/50">Glasses off · good light · eye level</p></div>
       </main>);
@@ -226,16 +301,17 @@ export default function Calibrate() {
           <path d="M70 108q8-5 16 0M114 108q8-5 16 0" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" /><path d="M82 152q18 12 36 0" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
           <path d="M18 20h22M18 20v22M182 20h-22M182 20v22M18 220h22M18 220v-22M182 220h-22M182 220v-22" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
         </svg>
-        <h1 className="mt-6 font-display text-4xl">{first ? "Let’s calibrate" : "Calibrate"}</h1>
-        <p className="mt-1 text-navy/60">About 3 minutes</p>
+        <h1 className="mt-6 font-display text-4xl">{daily ? "Daily recalibration" : first ? "Let’s calibrate" : "Calibrate"}</h1>
+        <p className="mt-1 text-navy/60">{daily ? "About 3 minutes. Once a day keeps your measurements accurate." : "About 3 minutes"}</p>
         <ul className="mt-7 grid w-full grid-cols-3 gap-3 text-xs text-navy/80">
           <li className="rounded-2xl bg-paper px-2 py-4 shadow-soft"><svg viewBox="0 0 32 32" className="mx-auto h-8 w-8 text-teal" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><circle cx="9" cy="19" r="5" /><circle cx="23" cy="19" r="5" /><path d="M14 19h4M4 19L6 10M28 19l-2-9M5 28L27 8" /></svg><span className="mt-2 block">Glasses off</span></li>
           <li className="rounded-2xl bg-paper px-2 py-4 shadow-soft"><svg viewBox="0 0 32 32" className="mx-auto h-8 w-8 text-teal" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><circle cx="16" cy="16" r="5" /><path d="M16 4v3M16 25v3M4 16h3M25 16h3M7.5 7.5l2 2M22.5 22.5l2 2M24.5 7.5l-2 2M9.5 22.5l-2 2" /></svg><span className="mt-2 block">Good light</span></li>
           <li className="rounded-2xl bg-paper px-2 py-4 shadow-soft"><svg viewBox="0 0 32 32" className="mx-auto h-8 w-8 text-teal" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="9" y="3" width="14" height="26" rx="3" /><circle cx="16" cy="10" r="2" /><path d="M13 25h6" /></svg><span className="mt-2 block">Eye level</span></li>
         </ul>
       </div>
-      {err && <p role="alert" className="mb-3 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
-      <button className="btn-primary min-h-[60px] w-full text-lg" disabled={cam === "loading"} onClick={() => startCam("align")}>{cam === "loading" ? "Starting camera…" : "Start"}</button>
+      {settingsBlock}
+      {err && <p role="alert" className="mb-3 mt-3 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
+      <button className="btn-primary mt-4 min-h-[60px] w-full text-lg" disabled={cam === "loading"} onClick={() => startCam("align")}>{cam === "loading" ? "Starting camera…" : "Start"}</button>
       {first && <p className="mt-3 text-center text-xs text-navy/50"><button className="underline" onClick={() => { try { sessionStorage.setItem("sq-skipcal", "1"); } catch { /* ignore */ } location.href = "/dashboard"; }}>Skip for now</button></p>}
     </main>);
 
@@ -264,8 +340,11 @@ export default function Calibrate() {
           <p className={`rounded-xl p-3 ${dashOk ? "bg-sage/25" : "bg-gold/25"}`}>Mirror Dash: {dashOk ? "ready" : "not ready yet"}</p>
           <p className={`rounded-xl p-3 ${sliceOk ? "bg-sage/25" : "bg-gold/25"}`}>Fruit Slice: {sliceOk ? "ready" : "needs all three tongue movements"}</p></div>
         {err && <p role="alert" className="mt-3 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
+        {nParts > 0 && vid === "idle" && <p className="mt-3 rounded-xl bg-paper p-3 text-sm text-navy/70 shadow-soft">Your recalibration video will be uploaded when you save.</p>}
+        {vid === "uploading" && <p role="status" className="mt-3 rounded-xl bg-paper p-3 text-sm text-navy/70 shadow-soft">Uploading your recalibration video. Please keep this page open…</p>}
+        {vid === "failed" && <div className="mt-3 grid gap-2"><button className="btn-primary min-h-[52px]" onClick={async () => { if (await uploadParts()) setTimeout(() => { location.href = nextUrl(); }, 600); }}>Try upload again</button><button className="btn-quiet" onClick={() => { location.href = nextUrl(); }}>Continue without the video</button></div>}
         <div className="mt-auto pt-6"><button className="btn-primary w-full min-h-[60px] text-lg" disabled={saving || saved || !(flightOk || dashOk || sliceOk)} onClick={save}>{saved ? "Saved ✓" : saving ? "Saving…" : "Save calibration"}</button>
-          <button className="btn-quiet mt-3 w-full" disabled={saving} onClick={() => goBack()}>Back</button></div>
+          <button className="btn-quiet mt-3 w-full" disabled={saving || saved || vid === "uploading"} onClick={() => goBack()}>Back</button></div>
       </main>);
   }
 
@@ -278,6 +357,7 @@ export default function Calibrate() {
           <span className="rounded bg-[#0f1038]/70 px-2.5 py-1 font-mono text-[11px] uppercase tracking-[.2em] text-[#8fd0ff] backdrop-blur">{step === "align" ? "Align" : step === "rest" ? "Baseline" : one ? "Recalibrate" : `Move ${Math.max(1, idx - 2)}/${MOVES.length}`}</span>
           {(isMove || step === "rest") && <span className="rounded-lg bg-[#0f1038]/70 p-1.5 backdrop-blur"><Guide id={isMove ? (step as Id) : "rest"} size={58} /></span>}
         </div>
+        {recOn && <div className="pointer-events-none absolute left-3 top-[58px] flex items-center gap-1.5 rounded bg-[#0f1038]/70 px-2 py-1 text-[11px] text-[#ffb3c4]" role="status"><span className="h-2 w-2 rounded-full bg-[#ff5a7a]" />Recording this recalibration</div>}
         <div className="pointer-events-none absolute inset-x-0 top-[34%] flex justify-center px-6 text-center">
           {hud.phase === "flash" ? <span className="rounded-full bg-[#8fd0ff] px-5 py-2 text-lg font-semibold text-[#0f1038]">✓ Captured</span>
             : hud.phase === "count" && hud.count > 0 && (isMove || step === "rest") ? <span className="font-display text-[110px] font-bold leading-none text-white drop-shadow-[0_0_24px_rgba(143,208,255,.9)]" aria-live="assertive">{hud.count}</span>
