@@ -18,9 +18,9 @@ const COPY: Record<Id, { title: string; cue: string; tip: string; games: string 
   pucker: { title: "Lip pucker", cue: "Round your lips like “ooo”", tip: "Gently purse them and hold.", games: "Flight" },
   right: { title: "Pucker to your right", cue: "Pucker, then nudge your lips to your right", tip: "Round your lips, then shift them toward your right cheek.", games: "Dash" },
   left: { title: "Pucker to your left", cue: "Pucker, then nudge your lips to your left", tip: "Round your lips, then shift them toward your left cheek.", games: "Dash" },
-  tright: { title: "Tongue swipe right", cue: "Tongue out, sweep it to your right", tip: "Stick your tongue out and sweep it toward your right cheek. A big, clear sweep works best.", games: "Fruit Slice" },
-  tleft: { title: "Tongue swipe left", cue: "Tongue out, sweep it to your left", tip: "Stick your tongue out and sweep it toward your left cheek. A big, clear sweep works best.", games: "Fruit Slice" },
-  tout: { title: "Tongue poke", cue: "Poke your tongue straight out", tip: "Stick your tongue straight out, like saying “ahh”, and hold it.", games: "Fruit Slice" },
+  tright: { title: "Tongue swipe right", cue: "Tongue out, sweep it to your right", tip: "Stick your tongue out and point it to the right corner of your mouth. Watch the “Detected” bar fill, then hold.", games: "Fruit Slice" },
+  tleft: { title: "Tongue swipe left", cue: "Tongue out, sweep it to your left", tip: "Stick your tongue out and point it to the left corner of your mouth. Watch the “Detected” bar fill, then hold.", games: "Fruit Slice" },
+  tout: { title: "Tongue poke", cue: "Poke your tongue straight out", tip: "Stick your tongue straight out, like saying “ahh”. Watch the “Detected” bar fill, then hold.", games: "Fruit Slice" },
   close: { title: "Gentle eye closure", cue: "Close your eyes softly", tip: "Soft, like resting. No squeezing.", games: "Flight" },
 };
 const MINSK: Record<SK, number> = { smile: .015, brow: .015, frown: .04, pucker: .08, close: .08, sideA: .08, sideB: .08, tonA: .03, tonB: .03, tongue: .12 };
@@ -56,7 +56,7 @@ export default function Calibrate() {
   const stream = useRef<MediaStream | null>(null), tracker = useRef<Awaited<ReturnType<typeof createTracker>> | null>(null), latest = useRef<Frame | null>(null);
   const [step, setStep] = useState<Step>("intro"), [cam, setCam] = useState<"off" | "loading" | "on">("off"), [err, setErr] = useState<string | null>(null);
   const [built, setBuilt] = useState<Built | null>(null), [saving, setSaving] = useState(false), [saved, setSaved] = useState(false);
-  const [hud, setHud] = useState({ aligned: false, locked: false, hint: "Looking for your face…", progress: 0, phase: "brief" as "brief" | "count" | "hold" | "flash", skipHint: false, face: false, count: 0 as number });
+  const [hud, setHud] = useState({ aligned: false, locked: false, hint: "Looking for your face…", progress: 0, phase: "brief" as "brief" | "count" | "hold" | "flash", skipHint: false, face: false, count: 0 as number, live: 0 });
   const S = useRef({ step: "intro" as Step, alignedSince: 0, lostSince: 0, locked: false, enteredAt: 0, phase: "brief" as "brief" | "count" | "hold" | "flash", phaseStart: 0, lostAt: 0, fails: 0, skipBrief: false, over: 0, holdStart: 0, weakSince: 0, buf: [] as Vals[], restBuf: [] as Vals[], restMs: 0, last: 0, flashUntil: 0, bestKey: "sideA" as SK, rightKey: null as SK | null, trightKey: null as SK | null, lockTRight: null as SK | null, neutral: null as Neutral | null, redo: false, samples: {} as Partial<Record<Id, Vals[]>>, progress: 0, hint: "", face: false, aligned: false, rough: false, one: null as Id | null, lockRight: null as SK | null, acBuf: [] as AC[], ac0: null as AC | null });
   type Prev = { flight: Record<string, any>; dash: Record<string, any>; neutral: Record<string, any>; ac0: AC | null };
   const [prev, setPrev] = useState<Prev | null | undefined>(undefined), [one, setOne] = useState<Id | null>(null);
@@ -230,7 +230,12 @@ export default function Calibrate() {
         }
         hudSkip = r.fails >= 2 && !isRest;
       }
-      if (now - hudT > 100) { hudT = now; setHud({ aligned: r.aligned, locked: r.locked, hint, progress: r.progress, phase: r.phase, skipHint: hudSkip, face, count }); }
+      let live = 0;
+      if ((r.step === "tright" || r.step === "tleft" || r.step === "tout") && r.neutral && good) {
+        const nu = r.neutral, v = sig(fr!.vals!), rk = r.trightKey ?? r.lockTRight, keys: SK[] = r.step === "tout" ? ["tongue"] : r.step === "tleft" ? (rk ? [rk === "tonA" ? "tonB" : "tonA"] : ["tonA", "tonB"]) : (r.lockTRight ? [r.lockTRight] : ["tonA", "tonB"]);
+        live = Math.max(...keys.map(k => Math.max(0, Math.min(1, (v[k] - nu.sk[k].mean) / (Math.max(3 * nu.sk[k].std, MINSK[k]) * 2)))));
+      }
+      if (now - hudT > 100) { hudT = now; setHud({ aligned: r.aligned, locked: r.locked, hint, progress: r.progress, phase: r.phase, skipHint: hudSkip, face, count, live }); }
       drawHud(x, now, face, nx, ny, ok, r.locked, r.step);
     };
     let hudSkip = false;
@@ -372,6 +377,7 @@ export default function Calibrate() {
             {c && (hud.phase === "brief" ? <><p className="text-xs uppercase tracking-[.2em] text-[#8fd0ff]">Next up</p><p className="mt-0.5 font-display text-xl">{c.cue}</p><p className="mt-1 text-sm text-white/75">{hud.skipHint ? "Not picking it up yet. Try a little more this time, or skip this one." : `${c.tip}`}</p></>
               : hud.phase === "count" ? <><p className="font-display text-xl">{c.cue}</p><p className="mt-1 text-sm text-white/75">Start making the face now, then hold it when the count ends.</p></>
               : <><p className="font-display text-xl">Hold it…</p><p className="mt-1 text-sm text-white/75">{c.title}. Keep it steady until the bar fills.</p></>)}
+            {(step === "tright" || step === "tleft" || step === "tout") && <div className="mt-2 flex items-center gap-2 text-xs text-white/80"><span className="w-16">Detected</span><div className="h-2.5 flex-1 rounded-full bg-white/15"><div className="h-2.5 rounded-full bg-[#ffb3c4] transition-[width] duration-100" style={{ width: `${Math.round(hud.live * 100)}%` }} /></div></div>}
             <div className="mt-2.5 h-1 rounded-full bg-white/15"><div className="h-1 rounded-full bg-[#8fd0ff] transition-[width] duration-100" style={{ width: `${Math.round(hud.progress * 100)}%` }} /></div>
           </div></div>
       </div>
