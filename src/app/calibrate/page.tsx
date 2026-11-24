@@ -5,11 +5,11 @@ import { createTracker, type Frame, type Vals } from "@/lib/tracking";
 import { meanAC, acFromSaved, type AC } from "@/lib/commissure";
 
 // ---------- what we measure ----------
-type Id = "smile" | "brow" | "frown" | "pucker" | "right" | "left" | "close";
-type SK = "smile" | "brow" | "frown" | "pucker" | "close" | "sideA" | "sideB";
+type Id = "smile" | "brow" | "frown" | "pucker" | "right" | "left" | "tright" | "tleft" | "close";
+type SK = "smile" | "brow" | "frown" | "pucker" | "close" | "sideA" | "sideB" | "tonA" | "tonB";
 type Step = "intro" | "align" | "rest" | Id | "review";
-const ORDER: Step[] = ["intro", "align", "rest", "smile", "brow", "frown", "pucker", "right", "left", "close", "review"];
-const MOVES: Id[] = ["smile", "brow", "frown", "pucker", "right", "left", "close"];
+const ORDER: Step[] = ["intro", "align", "rest", "smile", "brow", "frown", "pucker", "right", "left", "tright", "tleft", "close", "review"];
+const MOVES: Id[] = ["smile", "brow", "frown", "pucker", "right", "left", "tright", "tleft", "close"];
 const COPY: Record<Id, { title: string; cue: string; tip: string; games: string }> = {
   smile: { title: "Smile", cue: "Close-mouth smile or smile with teeth", tip: "Either style works. Never force it.", games: "Flight · Dash" },
   brow: { title: "Eyebrow raise", cue: "Lift your eyebrows", tip: "Raise them gently, as if mildly surprised.", games: "Flight · Dash" },
@@ -17,13 +17,15 @@ const COPY: Record<Id, { title: string; cue: string; tip: string; games: string 
   pucker: { title: "Lip pucker", cue: "Round your lips like “ooo”", tip: "Gently purse them and hold.", games: "Flight" },
   right: { title: "Pucker to your right", cue: "Pucker, then nudge your lips to your right", tip: "Round your lips, then shift them toward your right cheek.", games: "Dash" },
   left: { title: "Pucker to your left", cue: "Pucker, then nudge your lips to your left", tip: "Round your lips, then shift them toward your left cheek.", games: "Dash" },
+  tright: { title: "Tongue to your right", cue: "Stick your tongue out and point it to your right", tip: "Optional. A gentle point toward your right cheek, tongue out. Only if you want to use your tongue instead of a pucker.", games: "Dash (tongue option)" },
+  tleft: { title: "Tongue to your left", cue: "Stick your tongue out and point it to your left", tip: "Optional. A gentle point toward your left cheek, tongue out.", games: "Dash (tongue option)" },
   close: { title: "Gentle eye closure", cue: "Close your eyes softly", tip: "Soft, like resting. No squeezing.", games: "Flight" },
 };
-const MINSK: Record<SK, number> = { smile: .015, brow: .015, frown: .04, pucker: .08, close: .08, sideA: .08, sideB: .08 };
+const MINSK: Record<SK, number> = { smile: .015, brow: .015, frown: .04, pucker: .08, close: .08, sideA: .08, sideB: .08, tonA: .04, tonB: .04 };
 const CAL_KEYS = ["smile", "brow", "pucker", "close", "liftL", "liftR", "browL", "browR", "closeL", "closeR"] as (keyof Vals)[];
 const FSIDES: Record<string, (keyof Vals)[] | null> = { smile: ["liftL", "liftR"], brow: ["browL", "browR"], pucker: null, close: ["closeL", "closeR"] };
-const sig = (v: Vals): Record<SK, number> => ({ smile: v.smile, brow: v.brow, frown: v.frown, pucker: v.pucker, close: v.close, sideA: v.sideA - 0.6 * v.sideB + 0.3 * v.pucker, sideB: v.sideB - 0.6 * v.sideA + 0.3 * v.pucker });
-const SKS: SK[] = ["smile", "brow", "frown", "pucker", "close", "sideA", "sideB"];
+const sig = (v: Vals): Record<SK, number> => ({ smile: v.smile, brow: v.brow, frown: v.frown, pucker: v.pucker, close: v.close, sideA: v.sideA - 0.6 * v.sideB + 0.3 * v.pucker, sideB: v.sideB - 0.6 * v.sideA + 0.3 * v.pucker, tonA: v.tonA, tonB: v.tonB });
+const SKS: SK[] = ["smile", "brow", "frown", "pucker", "close", "sideA", "sideB", "tonA", "tonB"];
 const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / (a.length || 1);
 const sd = (a: number[]) => { const m = mean(a); return Math.sqrt(mean(a.map(x => (x - m) ** 2))); };
 const topMean = (a: number[]) => mean([...a].sort((x, y) => y - x).slice(0, Math.max(5, Math.floor(a.length / 4))));
@@ -33,15 +35,15 @@ const CW = 360, CH = 480, CX = CW / 2, CY = CH * .46, RX = CW * .34, RY = CH * .
 const BLUE = "#8fd0ff", PURPLE = "#b79cff";
 
 function Guide({ id, size = 64 }: { id: Id | "rest" | "pucker"; size?: number }) {
-  const sx = id === "right" ? 5 : id === "left" ? -5 : 0;
+  const sx = id === "right" ? 5 : id === "left" ? -5 : 0, tg = id === "tright" || id === "tleft", td = id === "tright" ? 1 : -1;
   return (
     <svg width={size} height={size} viewBox="0 0 100 100" fill="none" stroke={BLUE} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <ellipse cx="50" cy="52" rx="31" ry="38" strokeOpacity=".5" />
       {id === "brow" ? <><path d="M26 33q9-9 18 0M56 33q9-9 18 0" /><circle cx="35" cy="46" r="4" fill={BLUE} /><circle cx="65" cy="46" r="4" fill={BLUE} /></>
         : id === "close" ? <><path d="M27 46q8 7 16 0M57 46q8 7 16 0" /><path d="M27 36q8-4 16 0M57 36q8-4 16 0" strokeOpacity=".6" /></>
         : <><path d="M27 37q8-4 16 0M57 37q8-4 16 0" strokeOpacity=".7" /><circle cx="36" cy="47" r="3" fill={BLUE} /><circle cx="64" cy="47" r="3" fill={BLUE} /></>}
-      {id === "smile" ? <path d="M33 68q17 14 34 0" /> : id === "frown" ? <path d="M35 77q15-12 30 0" /> : id === "pucker" || id === "right" || id === "left" ? <circle cx={50 + sx * 2.4} cy="70" r="6.5" /> : id === "brow" ? <path d="M40 70h20" /> : <path d="M38 70h24" strokeOpacity=".7" />}
-      {(id === "right" || id === "left") && <path d={id === "right" ? "M68 70h14m-5-5l5 5-5 5" : "M32 70H18m5-5l-5 5 5 5"} />}
+      {id === "smile" ? <path d="M33 68q17 14 34 0" /> : id === "frown" ? <path d="M35 77q15-12 30 0" /> : tg ? <><path d="M42 66h16q0 6-8 6t-8-6z" /><path d={`M${50 + td * 2} 70q${td * 4} 9 ${td * 9} 7`} stroke="#ff9db4" /></> : id === "pucker" || id === "right" || id === "left" ? <circle cx={50 + sx * 2.4} cy="70" r="6.5" /> : id === "brow" ? <path d="M40 70h20" /> : <path d="M38 70h24" strokeOpacity=".7" />}
+      {(id === "right" || id === "left" || tg) && <path d={id === "right" || id === "tright" ? "M68 70h14m-5-5l5 5-5 5" : "M32 70H18m5-5l-5 5 5 5"} />}
     </svg>);
 }
 
@@ -53,7 +55,7 @@ export default function Calibrate() {
   const [step, setStep] = useState<Step>("intro"), [cam, setCam] = useState<"off" | "loading" | "on">("off"), [err, setErr] = useState<string | null>(null);
   const [built, setBuilt] = useState<Built | null>(null), [saving, setSaving] = useState(false), [saved, setSaved] = useState(false);
   const [hud, setHud] = useState({ aligned: false, locked: false, hint: "Looking for your face…", progress: 0, phase: "brief" as "brief" | "count" | "hold" | "flash", skipHint: false, face: false, count: 0 as number });
-  const S = useRef({ step: "intro" as Step, alignedSince: 0, lostSince: 0, locked: false, enteredAt: 0, phase: "brief" as "brief" | "count" | "hold" | "flash", phaseStart: 0, lostAt: 0, fails: 0, skipBrief: false, over: 0, holdStart: 0, weakSince: 0, buf: [] as Vals[], restBuf: [] as Vals[], restMs: 0, last: 0, flashUntil: 0, bestKey: "sideA" as SK, rightKey: null as SK | null, neutral: null as Neutral | null, redo: false, samples: {} as Partial<Record<Id, Vals[]>>, progress: 0, hint: "", face: false, aligned: false, rough: false, one: null as Id | null, lockRight: null as SK | null, acBuf: [] as AC[], ac0: null as AC | null });
+  const S = useRef({ step: "intro" as Step, alignedSince: 0, lostSince: 0, locked: false, enteredAt: 0, phase: "brief" as "brief" | "count" | "hold" | "flash", phaseStart: 0, lostAt: 0, fails: 0, skipBrief: false, over: 0, holdStart: 0, weakSince: 0, buf: [] as Vals[], restBuf: [] as Vals[], restMs: 0, last: 0, flashUntil: 0, bestKey: "sideA" as SK, rightKey: null as SK | null, trightKey: null as SK | null, lockTRight: null as SK | null, neutral: null as Neutral | null, redo: false, samples: {} as Partial<Record<Id, Vals[]>>, progress: 0, hint: "", face: false, aligned: false, rough: false, one: null as Id | null, lockRight: null as SK | null, acBuf: [] as AC[], ac0: null as AC | null });
   type Prev = { flight: Record<string, any>; dash: Record<string, any>; neutral: Record<string, any>; ac0: AC | null };
   const [prev, setPrev] = useState<Prev | null | undefined>(undefined), [one, setOne] = useState<Id | null>(null);
   const [first, setFirst] = useState(false); useEffect(() => { setFirst(new URLSearchParams(location.search).get("first") === "1"); }, []);
@@ -75,7 +77,7 @@ export default function Calibrate() {
     if (!n) { location.href = "/dashboard"; return; }
     if (n === "intro") { stop(); setCam("off"); enter("intro"); return; }
     if (cam === "off") { startCam(n); return; }
-    delete S.current.samples[n as Id]; if (n === "rest") S.current.neutral = null; if (n === "right" && !S.current.one) S.current.rightKey = null;
+    delete S.current.samples[n as Id]; if (n === "rest") S.current.neutral = null; if (n === "right" && !S.current.one) S.current.rightKey = null; if (n === "tright" && !S.current.one) S.current.trightKey = null;
     enter(n);
   }
   async function startCam(goTo: Step = "align") {
@@ -106,6 +108,9 @@ export default function Calibrate() {
     let rk: SK | null = S.current.lockRight;
     if (sm.right?.length) { const lk = S.current.lockRight, a = mv(sm.right, "sideA"), b = mv(sm.right, "sideB"), win = lk ? mv(sm.right, lk) : a.range / MINSK.sideA >= b.range / MINSK.sideB ? a : b; rk = win.key; dash.right = win; status.right = win.detectable ? "ok" : "weak"; } else status.right = "skipped";
     if (sm.left?.length && rk) { const w = mv(sm.left, "sideA", rk === "sideA" ? "sideB" : "sideA"); dash.left = w; status.left = w.detectable ? "ok" : "weak"; } else status.left = "skipped";
+    let tk: SK | null = S.current.lockTRight;
+    if (sm.tright?.length) { const lk = S.current.lockTRight, a = mv(sm.tright, "tonA"), b = mv(sm.tright, "tonB"), win = lk ? mv(sm.tright, lk) : a.range / MINSK.tonA >= b.range / MINSK.tonB ? a : b; tk = win.key; dash.tright = win; status.tright = win.detectable ? "ok" : "weak"; } else status.tright = "skipped";
+    if (sm.tleft?.length && tk) { const w = mv(sm.tleft, "tonA", tk === "tonA" ? "tonB" : "tonA"); dash.tleft = w; status.tleft = w.detectable ? "ok" : "weak"; } else status.tleft = "skipped";
     const neutral: Record<string, { mean: number; std: number }> = {}; for (const k of CAL_KEYS) neutral[k as string] = nu.raw[k as string];
     return { flight, dash, neutral, status };
   }
@@ -154,10 +159,10 @@ export default function Calibrate() {
                   r.neutral = nu; r.ac0 = meanAC(r.acBuf); r.phase = "flash"; r.flashUntil = now + 1100; buzz(100);
                 } else { r.fails++; r.phase = "brief"; r.phaseStart = now; }
               } else if (r.neutral) {
-                const nu = r.neutral, rkey = r.rightKey ?? r.lockRight, cands: SK[] = id === "right" ? (r.lockRight ? [r.lockRight] : ["sideA", "sideB"]) : id === "left" ? (rkey ? [rkey === "sideA" ? "sideB" : "sideA"] : ["sideA", "sideB"]) : [id as SK];
+                const nu = r.neutral, tng = id === "tright" || id === "tleft", fam: SK[] = tng ? ["tonA", "tonB"] : ["sideA", "sideB"], isR = id === "right" || id === "tright", isL = id === "left" || id === "tleft", rkey = tng ? (r.trightKey ?? r.lockTRight) : (r.rightKey ?? r.lockRight), lockK = tng ? r.lockTRight : r.lockRight, cands: SK[] = isR ? (lockK ? [lockK] : fam) : isL ? (rkey ? [rkey === fam[0] ? fam[1] : fam[0]] : fam) : [id as SK];
                 let bk = cands[0], br = -9;
                 for (const k of cands) { const a = r.buf.map(q => sig(q)[k]), n = nu.sk[k], ratio = (topMean(a) - n.mean) / Math.max(3 * n.std, MINSK[k]); if (ratio > br) { br = ratio; bk = k; } }
-                if (br > 1) { r.samples[id] = r.buf; if (id === "right") r.rightKey = bk; r.phase = "flash"; r.flashUntil = now + 1200; buzz(110); }
+                if (br > 1) { r.samples[id] = r.buf; if (id === "right") r.rightKey = bk; if (id === "tright") r.trightKey = bk; r.phase = "flash"; r.flashUntil = now + 1200; buzz(110); }
                 else { r.fails++; r.phase = "brief"; r.phaseStart = now; r.buf = []; }
               } else enter("rest");
             }
@@ -193,18 +198,18 @@ export default function Calibrate() {
 
   if (step === "intro" && prev === undefined && !first) return <main className="min-h-dvh" />;
   if (step === "intro" && !first && prev) {
-    const ok = (m: Id) => { const d = m === "frown" ? prev.dash.duck : m === "right" ? prev.dash.right : m === "left" ? prev.dash.left : m === "pucker" || m === "close" ? prev.flight[m] : prev.flight[m] ?? prev.dash.jump; return d ? (d.detectable ? "ready" : "weak") : "none"; };
-    const choose = (m: Id) => { const r = S.current; r.one = m; r.redo = true; r.lockRight = m === "right" ? (prev.dash.left ? prev.dash.right?.key ?? null : null) : m === "left" ? prev.dash.right?.key ?? null : null; setOne(m); startCam("align"); };
+    const ok = (m: Id) => { const d = m === "frown" ? prev.dash.duck : m === "right" ? prev.dash.right : m === "left" ? prev.dash.left : m === "tright" ? prev.dash.tright : m === "tleft" ? prev.dash.tleft : m === "pucker" || m === "close" ? prev.flight[m] : prev.flight[m] ?? prev.dash.jump; return d ? (d.detectable ? "ready" : "weak") : "none"; };
+    const choose = (m: Id) => { const r = S.current; r.one = m; r.redo = true; r.lockRight = m === "right" ? (prev.dash.left ? prev.dash.right?.key ?? null : null) : m === "left" ? prev.dash.right?.key ?? null : null; r.lockTRight = m === "tright" ? (prev.dash.tleft ? prev.dash.tright?.key ?? null : null) : m === "tleft" ? prev.dash.tright?.key ?? null : null; setOne(m); startCam("align"); };
     return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))]">{videoEl}
         <button className="self-start text-sm text-navy/60" onClick={() => (location.href = nextUrl())} aria-label="Back">← Back</button>
         <h1 className="mt-5 font-display text-4xl">Recalibrate</h1>
         <p className="mt-1 text-navy/60">Pick one movement</p>
-        <ul className="mt-5 grid gap-2">{MOVES.map(m => { const s = ok(m), off = m === "left" && !prev.dash.right; return <li key={m}><button disabled={cam === "loading" || off} onClick={() => choose(m)} className="flex w-full items-center gap-3 rounded-2xl bg-paper p-3 text-left shadow-soft transition active:scale-[.99] disabled:opacity-40">
-          <Guide id={m} size={44} /><span className="flex-1"><b>{COPY[m].title}</b><br /><span className="text-xs text-navy/60">{off ? "Do pucker right first" : COPY[m].games}</span></span>
+        <ul className="mt-5 grid gap-2">{MOVES.map(m => { const s = ok(m), off = (m === "left" && !prev.dash.right) || (m === "tleft" && !prev.dash.tright); return <li key={m}><button disabled={cam === "loading" || off} onClick={() => choose(m)} className="flex w-full items-center gap-3 rounded-2xl bg-paper p-3 text-left shadow-soft transition active:scale-[.99] disabled:opacity-40">
+          <Guide id={m} size={44} /><span className="flex-1"><b>{COPY[m].title}</b><br /><span className="text-xs text-navy/60">{off ? (m === "tleft" ? "Do tongue right first" : "Do pucker right first") : COPY[m].games}</span></span>
           <span className={`rounded-full px-3 py-1 text-xs ${s === "ready" ? "bg-sage/40" : "bg-gold/30"}`}>{s === "ready" ? "Ready" : s === "weak" ? "Weak" : "Not set"}</span></button></li>; })}</ul>
         {err && <p role="alert" className="mt-3 rounded-xl bg-lav/50 p-3 text-sm">{err}</p>}
-        <div className="mt-auto pt-6"><button className="btn-quiet w-full" disabled={cam === "loading"} onClick={() => { S.current.one = null; S.current.lockRight = null; setOne(null); startCam("align"); }}>{cam === "loading" ? "Starting camera…" : "Recalibrate everything"}</button>
+        <div className="mt-auto pt-6"><button className="btn-quiet w-full" disabled={cam === "loading"} onClick={() => { S.current.one = null; S.current.lockRight = null; S.current.lockTRight = null; setOne(null); startCam("align"); }}>{cam === "loading" ? "Starting camera…" : "Recalibrate everything"}</button>
           <p className="mt-3 text-center text-xs text-navy/50">Glasses off · good light · eye level</p></div>
       </main>);
   }
@@ -220,7 +225,7 @@ export default function Calibrate() {
           <path d="M18 20h22M18 20v22M182 20h-22M182 20v22M18 220h22M18 220v-22M182 220h-22M182 220v-22" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
         </svg>
         <h1 className="mt-6 font-display text-4xl">{first ? "Let’s calibrate" : "Calibrate"}</h1>
-        <p className="mt-1 text-navy/60">About 2 minutes</p>
+        <p className="mt-1 text-navy/60">About 3 minutes</p>
         <ul className="mt-7 grid w-full grid-cols-3 gap-3 text-xs text-navy/80">
           <li className="rounded-2xl bg-paper px-2 py-4 shadow-soft"><svg viewBox="0 0 32 32" className="mx-auto h-8 w-8 text-teal" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><circle cx="9" cy="19" r="5" /><circle cx="23" cy="19" r="5" /><path d="M14 19h4M4 19L6 10M28 19l-2-9M5 28L27 8" /></svg><span className="mt-2 block">Glasses off</span></li>
           <li className="rounded-2xl bg-paper px-2 py-4 shadow-soft"><svg viewBox="0 0 32 32" className="mx-auto h-8 w-8 text-teal" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><circle cx="16" cy="16" r="5" /><path d="M16 4v3M16 25v3M4 16h3M25 16h3M7.5 7.5l2 2M22.5 22.5l2 2M24.5 7.5l-2 2M9.5 22.5l-2 2" /></svg><span className="mt-2 block">Good light</span></li>
