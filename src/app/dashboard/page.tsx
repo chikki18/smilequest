@@ -92,6 +92,13 @@ function TestHome() {
           <path d="M150 90l-2-13 9 7zM170 90l2-13-9 7z" fill="#e8772e" /><circle cx="160" cy="88" r="10" fill="#f08a3c" /><path d="M153 91q7 9 14 0q-7 3-14 0z" fill="#fff" /><circle cx="156" cy="86" r="1.6" fill="#1a1650" /><circle cx="164" cy="86" r="1.6" fill="#1a1650" /><circle cx="160" cy="91" r="1.7" fill="#1a1650" />
           <path d="M152 118l-5 8M168 118l5 8" stroke="#c4561c" strokeWidth="4" strokeLinecap="round" /></svg>
         <div className="flex items-center justify-between p-5"><div><h3 className="font-display text-2xl">Mirror Dash</h3><p className="mt-1 text-sm text-navy/70">Fast and challenging. Run, jump, duck and fly.</p></div><span className="text-2xl text-teal" aria-hidden>→</span></div></a>
+      <a href="/slice" className="mt-4 block overflow-hidden rounded-3xl border border-navy/10 bg-paper shadow-soft transition active:scale-[.99]">
+        <svg viewBox="0 0 320 130" className="block w-full" aria-hidden><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#14194a" /><stop offset=".6" stopColor="#3a2a6e" /><stop offset="1" stopColor="#8a3f6e" /></linearGradient></defs><rect width="320" height="130" fill="url(#sg)" />
+          <path d="M20 70h280" stroke="#ff9db4" strokeWidth="9" strokeLinecap="round" opacity=".75" /><path d="M20 67h280" stroke="#fff" strokeWidth="2" strokeLinecap="round" opacity=".5" />
+          <g><path d="M70 38a26 26 0 0 1 52 0z" fill="#fff1c9" stroke="#d93a42" strokeWidth="5" /><path d="M70 92a26 26 0 0 0 52 0z" fill="#fff1c9" stroke="#d93a42" strokeWidth="5" /></g>
+          <g><path d="M186 40a24 24 0 0 1 48 0z" fill="#ffc566" stroke="#ff9a1f" strokeWidth="5" /><path d="M186 94a24 24 0 0 0 48 0z" fill="#ffc566" stroke="#ff9a1f" strokeWidth="5" /></g>
+          <circle cx="270" cy="30" r="14" fill="#7048e8" /><circle cx="266" cy="25" r="4" fill="#fff" opacity=".4" /><circle cx="46" cy="104" r="9" fill="#ff5a6e" opacity=".9" /><circle cx="150" cy="22" r="3" fill="#fff" opacity=".7" /><circle cx="250" cy="100" r="3" fill="#fff" opacity=".7" /></svg>
+        <div className="flex items-center justify-between p-5"><div><h3 className="font-display text-2xl">Mirror Slice</h3><p className="mt-1 text-sm text-navy/70">Tongue exercise. Slice flying fruit with swipes and pokes.</p></div><span className="text-2xl text-teal" aria-hidden>→</span></div></a>
       <a href="/calibrate" className="btn-quiet mt-8 inline-flex min-h-[52px] w-full items-center justify-center">{any ? "Recalibrate" : "Calibrate"}</a>
       <button className="mt-10 block w-full text-center text-sm text-navy/60 underline" onClick={logout}>Log out</button>
     </main>);
