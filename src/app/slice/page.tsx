@@ -14,7 +14,7 @@ type Cal = Partial<Record<M, Move>>;
 const INFO: Record<M, { name: string; action: string; tip: string; short: string }> = {
   tright: { name: "Tongue swipe right", action: "Swipe right", tip: "Stick your tongue out and sweep it to your right. It slices fruit across the right side.", short: "Swipe\nRight" },
   tleft: { name: "Tongue swipe left", action: "Swipe left", tip: "Stick your tongue out and sweep it to your left. It slices fruit across the left side.", short: "Swipe\nLeft" },
-  tout: { name: "Tongue poke", action: "Poke", tip: "Poke your tongue straight out. It slices fruit straight up the middle.", short: "Poke\nOut" },
+  tout: { name: "Tongue out", action: "Poke", tip: "Open your mouth and stick your tongue out. It slices fruit straight up the middle.", short: "Tongue\nOut" },
 };
 const sigs = (v: Vals): Record<SK, number> => ({ tonA: v.tonA, tonB: v.tonB, tongue: v.tongue });
 const calOk = (c: Cal | null) => !!c && MOVES.every(m => c[m]?.detectable);
