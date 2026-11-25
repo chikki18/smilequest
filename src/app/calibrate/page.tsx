@@ -20,7 +20,7 @@ const COPY: Record<Id, { title: string; cue: string; tip: string; games: string 
   left: { title: "Pucker to your left", cue: "Pucker, then nudge your lips to your left", tip: "Round your lips, then shift them toward your left cheek.", games: "Dash" },
   tright: { title: "Tongue swipe right", cue: "Tongue out, sweep it to your right", tip: "Stick your tongue out and point it to the right corner of your mouth. Watch the “Detected” bar fill, then hold.", games: "Fruit Slice" },
   tleft: { title: "Tongue swipe left", cue: "Tongue out, sweep it to your left", tip: "Stick your tongue out and point it to the left corner of your mouth. Watch the “Detected” bar fill, then hold.", games: "Fruit Slice" },
-  tout: { title: "Tongue poke", cue: "Poke your tongue straight out", tip: "Stick your tongue straight out, like saying “ahh”. Watch the “Detected” bar fill, then hold.", games: "Fruit Slice" },
+  tout: { title: "Tongue out", cue: "Open your mouth and stick your tongue out", tip: "Open your mouth wide, then stick your tongue out and hold. Watch the “Detected” bar fill.", games: "Fruit Slice" },
   close: { title: "Gentle eye closure", cue: "Close your eyes softly", tip: "Soft, like resting. No squeezing.", games: "Flight" },
 };
 const MINSK: Record<SK, number> = { smile: .015, brow: .015, frown: .04, pucker: .08, close: .08, sideA: .08, sideB: .08, tonA: .03, tonB: .03, tongue: .12 };
