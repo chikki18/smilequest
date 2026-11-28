@@ -1,5 +1,5 @@
 // Reusable face tracking engine (MediaPipe Face Landmarker). Runs on-device; no video is uploaded or stored.
-export type Vals = { smile:number; brow:number; pucker:number; close:number; liftL:number; liftR:number; browL:number; browR:number; closeL:number; closeR:number; frown:number; sideA:number; sideB:number; tongue:number; tonA:number; tonB:number };
+export type Vals = { smile:number; brow:number; pucker:number; close:number; liftL:number; liftR:number; browL:number; browR:number; closeL:number; closeR:number; frown:number; sideA:number; sideB:number; tongue:number; tonA:number; tonB:number; jaw:number; lnA:number; lnB:number };
 export type Quality = { face:boolean; size:boolean; light:boolean; fps:number };
 export type AC = { lx:number; ly:number; rx:number; ry:number };
 export type Frame = { t:number; vals:Vals|null; q:Quality; pos?:{ x:number; y:number; s:number }; ac?:AC };
@@ -113,7 +113,7 @@ export async function createTracker(video: HTMLVideoElement, onFrame: (f: Frame)
     // One signed sideways cue (jaw + mouth blendshapes + where the lip centre and lower lip sit relative to the nose); left and right are its two signs.
     const lat0 = (jB - jA) + 6 * ((X(P[13]) + X(P[14])) / 2 - X(P[1])) + 5 * (X(P[17]) - X(P[1])), lat = tf ? 4 * tf.shift + 0.3 * lat0 : lat0;
     const raw: Vals = { liftL, liftR, browL, browR, closeL, closeR, smile: (liftL + liftR) / 2, brow: (browL + browR) / 2, close: (closeL + closeR) / 2, pucker: bs.mouthPucker ?? 0,
-      frown: Math.max(0, 1.6 * ((bs.mouthFrownLeft ?? 0) + (bs.mouthFrownRight ?? 0)) / 2 + 0.5 * (bs.mouthShrugLower ?? 0) + 0.3 * ((bs.mouthPressLeft ?? 0) + (bs.mouthPressRight ?? 0)) / 2 - 0.9 * ((bs.browDownLeft ?? 0) + (bs.browDownRight ?? 0)) / 2 - 0.6 * (bs.browInnerUp ?? 0) - 0.4 * ((bs.browOuterUpLeft ?? 0) + (bs.browOuterUpRight ?? 0)) / 2 - 0.6 * ((bs.mouthSmileLeft ?? 0) + (bs.mouthSmileRight ?? 0)) / 2), sideA: bs.mouthLeft ?? 0, sideB: bs.mouthRight ?? 0, tongue, tonA: tw * Math.max(0, lat), tonB: tw * Math.max(0, -lat) };
+      frown: Math.max(0, 1.6 * ((bs.mouthFrownLeft ?? 0) + (bs.mouthFrownRight ?? 0)) / 2 + 0.5 * (bs.mouthShrugLower ?? 0) + 0.3 * ((bs.mouthPressLeft ?? 0) + (bs.mouthPressRight ?? 0)) / 2 - 0.9 * ((bs.browDownLeft ?? 0) + (bs.browDownRight ?? 0)) / 2 - 0.6 * (bs.browInnerUp ?? 0) - 0.4 * ((bs.browOuterUpLeft ?? 0) + (bs.browOuterUpRight ?? 0)) / 2 - 0.6 * ((bs.mouthSmileLeft ?? 0) + (bs.mouthSmileRight ?? 0)) / 2), sideA: bs.mouthLeft ?? 0, sideB: bs.mouthRight ?? 0, tongue, tonA: tw * Math.max(0, lat), tonB: tw * Math.max(0, -lat), jaw: Math.min(1, (bs.jawOpen ?? 0) / 0.35), lnA: Math.max(0, lat0), lnB: Math.max(0, -lat0) };
     const size = iod / W > 0.1 && iod / W < 0.45 && P[1].x > 0.1 && P[1].x < 0.9 && P[1].y > 0.1 && P[1].y < 0.9;
     if (!sm) sm = raw; else for (const k of Object.keys(raw) as (keyof Vals)[]) sm[k] = sm[k] * 0.65 + raw[k] * 0.35; // temporal smoothing
     const acr: AC = { lx: X(P[291]), ly: Y(P[291]), rx: X(P[61]), ry: Y(P[61]) };
