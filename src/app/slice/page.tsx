@@ -8,7 +8,7 @@ import { dailyDue, dailyUrl } from "@/lib/daily";
 // ---------- moves ----------
 type M = "tright" | "tleft" | "tout";
 const MOVES: M[] = ["tleft", "tout", "tright"];
-type SK = "tonA" | "tonB" | "tongue";
+type SK = "tonA" | "tonB" | "tongue" | "jaw" | "lnA" | "lnB";
 type Move = { key: SK; nm: number; std: number; peak: number; range: number; detectable: boolean };
 type Cal = Partial<Record<M, Move>>;
 const INFO: Record<M, { name: string; action: string; tip: string; short: string }> = {
@@ -16,7 +16,7 @@ const INFO: Record<M, { name: string; action: string; tip: string; short: string
   tleft: { name: "Tongue swipe left", action: "Swipe left", tip: "Point your tongue to the left. It slices the fruit on the left side of the screen.", short: "Swipe\nLeft" },
   tout: { name: "Tongue out", action: "Poke", tip: "Open your mouth and stick your tongue out. It slices the big golden watermelon in the middle.", short: "Tongue\nOut" },
 };
-const sigs = (v: Vals): Record<SK, number> => ({ tonA: v.tonA, tonB: v.tonB, tongue: v.tongue });
+const sigs = (v: Vals): Record<SK, number> => ({ tonA: v.tonA, tonB: v.tonB, tongue: v.tongue, jaw: v.jaw, lnA: v.lnA, lnB: v.lnB });
 const calOk = (c: Cal | null) => !!c && MOVES.every(m => c[m]?.detectable);
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
