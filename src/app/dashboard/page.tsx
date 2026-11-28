@@ -69,21 +69,21 @@ function TestHome() {
   if (!ok) return <main className="grid min-h-dvh place-items-center text-navy/60">Loading…</main>;
   const any = cal.flight || cal.dash;
   return (
-    <main className="mx-auto min-h-dvh max-w-md px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))]">
+    <main className="mx-auto min-h-dvh max-w-md px-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
       <div className="flex items-center justify-between gap-3"><p className="text-xs uppercase tracking-[.3em] text-teal">SmileQuest</p><ThemeToggle /></div>
-      <h1 className="mt-6 font-display text-4xl leading-tight">{name ? `Hi, ${name}.` : "Welcome back."}</h1>
+      <h1 className="mt-3 font-display text-3xl leading-tight">{name ? `Hi, ${name}.` : "Welcome back."}</h1>
       {due && any && <a href={dailyUrl("/dashboard")} className="mt-5 block rounded-2xl border border-teal/40 bg-teal/10 p-4 shadow-soft"><b>Daily recalibration</b><br /><span className="text-sm text-navy/70">About 3 minutes. Do it before you play today.</span></a>}
-      <h2 className="mt-8 text-xs uppercase tracking-[.25em] text-navy/60">Pick a game</h2>
-      <a href="/flyer" className="mt-3 block overflow-hidden rounded-3xl border border-navy/10 bg-paper shadow-soft transition active:scale-[.99]">
-        <svg viewBox="0 0 320 130" className="block w-full" aria-hidden><defs><linearGradient id="fg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="rgb(var(--lav))" /><stop offset="1" stopColor="rgb(var(--ivory))" /></linearGradient></defs><rect width="320" height="130" fill="url(#fg)" />
+      <h2 className="mt-5 text-xs uppercase tracking-[.25em] text-navy/60">Pick a game</h2>
+      <a href="/flyer" className="mt-3 flex items-stretch overflow-hidden rounded-3xl border border-navy/10 bg-paper shadow-soft transition active:scale-[.99]">
+        <svg viewBox="0 0 320 130" preserveAspectRatio="xMidYMid slice" className="block w-36 shrink-0 self-stretch" aria-hidden><defs><linearGradient id="fg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="rgb(var(--lav))" /><stop offset="1" stopColor="rgb(var(--ivory))" /></linearGradient></defs><rect width="320" height="130" fill="url(#fg)" />
           <path d="M0 112q50-22 100-6t110-8 110 10v22H0z" fill="rgb(var(--sage))" opacity=".35" />
           <rect x="206" y="-8" width="30" height="50" rx="7" fill="rgb(var(--teal))" /><rect x="206" y="88" width="30" height="50" rx="7" fill="rgb(var(--teal))" />
           <path d="M60 70h60" stroke="rgb(var(--paper))" strokeWidth="3" strokeLinecap="round" strokeDasharray="2 10" opacity=".9" />
           <circle cx="150" cy="66" r="15" fill="rgb(var(--navy))" /><path d="M140 66q-9-13-20-9 4 9 12 14z" fill="rgb(var(--navy))" opacity=".6" /><circle cx="155" cy="62" r="3.2" fill="rgb(var(--paper))" /><path d="M163 67l8 2-8 3z" fill="rgb(var(--gold))" />
           <circle cx="271" cy="65" r="6" fill="rgb(var(--gold))" /></svg>
-        <div className="flex items-center justify-between p-5"><div><h3 className="font-display text-2xl">Mirror Flight</h3><p className="mt-1 text-sm text-navy/70">Gentle and steady. Fly through the gaps.</p></div><span className="text-2xl text-teal" aria-hidden>→</span></div></a>
-      <a href="/dash" className="mt-4 block overflow-hidden rounded-3xl border border-navy/10 bg-paper shadow-soft transition active:scale-[.99]">
-        <svg viewBox="0 0 320 130" className="block w-full" aria-hidden><defs><linearGradient id="dg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#14143f" /><stop offset=".55" stopColor="#3a2f86" /><stop offset="1" stopColor="#6b4fb8" /></linearGradient><linearGradient id="dp" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#8f86d6" stopOpacity=".55" /><stop offset="1" stopColor="#c9c2f2" stopOpacity=".9" /></linearGradient></defs><rect width="320" height="130" fill="url(#dg)" />
+        <div className="flex min-h-[104px] flex-1 items-center justify-between gap-2 p-4"><div><h3 className="font-display text-xl">Mirror Flight</h3><p className="mt-1 text-sm text-navy/70">Gentle and steady. Fly through the gaps.</p></div><span className="text-2xl text-teal" aria-hidden>→</span></div></a>
+      <a href="/dash" className="mt-3 flex items-stretch overflow-hidden rounded-3xl border border-navy/10 bg-paper shadow-soft transition active:scale-[.99]">
+        <svg viewBox="0 0 320 130" preserveAspectRatio="xMidYMid slice" className="block w-36 shrink-0 self-stretch" aria-hidden><defs><linearGradient id="dg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#14143f" /><stop offset=".55" stopColor="#3a2f86" /><stop offset="1" stopColor="#6b4fb8" /></linearGradient><linearGradient id="dp" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#8f86d6" stopOpacity=".55" /><stop offset="1" stopColor="#c9c2f2" stopOpacity=".9" /></linearGradient></defs><rect width="320" height="130" fill="url(#dg)" />
           <circle cx="252" cy="26" r="13" fill="#e9e6ff" opacity=".9" />
           <path d="M0 62l30-14 24 10 28-16 26 14 24-8 28 12 26-6 24 8 26-12 24 14 30-8v34H0z" fill="#241f66" />
           <path d="M138 44h44v6h-44zM144 50h32v16h-32zM150 38h20v6h-20z" fill="#1a1650" /><rect x="154" y="54" width="12" height="12" fill="#6b4fb8" opacity=".7" />
@@ -95,16 +95,16 @@ function TestHome() {
           <ellipse cx="160" cy="104" rx="11" ry="15" fill="#e8772e" /><ellipse cx="160" cy="108" rx="6" ry="9" fill="#f7e0c4" />
           <path d="M150 90l-2-13 9 7zM170 90l2-13-9 7z" fill="#e8772e" /><circle cx="160" cy="88" r="10" fill="#f08a3c" /><path d="M153 91q7 9 14 0q-7 3-14 0z" fill="#fff" /><circle cx="156" cy="86" r="1.6" fill="#1a1650" /><circle cx="164" cy="86" r="1.6" fill="#1a1650" /><circle cx="160" cy="91" r="1.7" fill="#1a1650" />
           <path d="M152 118l-5 8M168 118l5 8" stroke="#c4561c" strokeWidth="4" strokeLinecap="round" /></svg>
-        <div className="flex items-center justify-between p-5"><div><h3 className="font-display text-2xl">Mirror Dash</h3><p className="mt-1 text-sm text-navy/70">Fast and challenging. Run, jump, duck and fly.</p></div><span className="text-2xl text-teal" aria-hidden>→</span></div></a>
-      <a href="/slice" className="mt-4 block overflow-hidden rounded-3xl border border-navy/10 bg-paper shadow-soft transition active:scale-[.99]">
-        <svg viewBox="0 0 320 130" className="block w-full" aria-hidden><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#14194a" /><stop offset=".6" stopColor="#3a2a6e" /><stop offset="1" stopColor="#8a3f6e" /></linearGradient></defs><rect width="320" height="130" fill="url(#sg)" />
+        <div className="flex min-h-[104px] flex-1 items-center justify-between gap-2 p-4"><div><h3 className="font-display text-xl">Mirror Dash</h3><p className="mt-1 text-sm text-navy/70">Fast and challenging. Run, jump, duck and fly.</p></div><span className="text-2xl text-teal" aria-hidden>→</span></div></a>
+      <a href="/slice" className="mt-3 flex items-stretch overflow-hidden rounded-3xl border border-navy/10 bg-paper shadow-soft transition active:scale-[.99]">
+        <svg viewBox="0 0 320 130" preserveAspectRatio="xMidYMid slice" className="block w-36 shrink-0 self-stretch" aria-hidden><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#14194a" /><stop offset=".6" stopColor="#3a2a6e" /><stop offset="1" stopColor="#8a3f6e" /></linearGradient></defs><rect width="320" height="130" fill="url(#sg)" />
           <path d="M20 70h280" stroke="#ff9db4" strokeWidth="9" strokeLinecap="round" opacity=".75" /><path d="M20 67h280" stroke="#fff" strokeWidth="2" strokeLinecap="round" opacity=".5" />
           <g><path d="M70 38a26 26 0 0 1 52 0z" fill="#fff1c9" stroke="#d93a42" strokeWidth="5" /><path d="M70 92a26 26 0 0 0 52 0z" fill="#fff1c9" stroke="#d93a42" strokeWidth="5" /></g>
           <g><path d="M186 40a24 24 0 0 1 48 0z" fill="#ffc566" stroke="#ff9a1f" strokeWidth="5" /><path d="M186 94a24 24 0 0 0 48 0z" fill="#ffc566" stroke="#ff9a1f" strokeWidth="5" /></g>
           <circle cx="270" cy="30" r="14" fill="#7048e8" /><circle cx="266" cy="25" r="4" fill="#fff" opacity=".4" /><circle cx="46" cy="104" r="9" fill="#ff5a6e" opacity=".9" /><circle cx="150" cy="22" r="3" fill="#fff" opacity=".7" /><circle cx="250" cy="100" r="3" fill="#fff" opacity=".7" /></svg>
-        <div className="flex items-center justify-between p-5"><div><h3 className="font-display text-2xl">Mirror Slice</h3><p className="mt-1 text-sm text-navy/70">Tongue exercise. Slice flying fruit with swipes and pokes.</p></div><span className="text-2xl text-teal" aria-hidden>→</span></div></a>
-      <a href="/calibrate" className="btn-quiet mt-8 inline-flex min-h-[52px] w-full items-center justify-center">{any ? "Recalibrate" : "Calibrate"}</a>
-      <button className="mt-10 block w-full text-center text-sm text-navy/60 underline" onClick={logout}>Log out</button>
+        <div className="flex min-h-[104px] flex-1 items-center justify-between gap-2 p-4"><div><h3 className="font-display text-xl">Mirror Slice</h3><p className="mt-1 text-sm text-navy/70">Tongue exercise. Slice flying fruit with swipes and pokes.</p></div><span className="text-2xl text-teal" aria-hidden>→</span></div></a>
+      <a href="/calibrate" className="btn-quiet mt-5 inline-flex min-h-[52px] w-full items-center justify-center">{any ? "Recalibrate" : "Calibrate"}</a>
+      <button className="mt-6 block w-full text-center text-sm text-navy/60 underline" onClick={logout}>Log out</button>
     </main>);
 }
 
