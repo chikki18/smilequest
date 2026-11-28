@@ -12,9 +12,9 @@ type SK = "tonA" | "tonB" | "tongue";
 type Move = { key: SK; nm: number; std: number; peak: number; range: number; detectable: boolean };
 type Cal = Partial<Record<M, Move>>;
 const INFO: Record<M, { name: string; action: string; tip: string; short: string }> = {
-  tright: { name: "Tongue swipe right", action: "Swipe right", tip: "Stick your tongue out and sweep it to your right. It slices fruit across the right side.", short: "Swipe\nRight" },
-  tleft: { name: "Tongue swipe left", action: "Swipe left", tip: "Stick your tongue out and sweep it to your left. It slices fruit across the left side.", short: "Swipe\nLeft" },
-  tout: { name: "Tongue out", action: "Poke", tip: "Open your mouth and stick your tongue out. It slices fruit straight up the middle.", short: "Tongue\nOut" },
+  tright: { name: "Tongue swipe right", action: "Swipe right", tip: "Point your tongue to the right. It slices the fruit on the right side of the screen.", short: "Swipe\nRight" },
+  tleft: { name: "Tongue swipe left", action: "Swipe left", tip: "Point your tongue to the left. It slices the fruit on the left side of the screen.", short: "Swipe\nLeft" },
+  tout: { name: "Tongue out", action: "Poke", tip: "Open your mouth and stick your tongue out. It slices the big golden watermelon in the middle.", short: "Tongue\nOut" },
 };
 const sigs = (v: Vals): Record<SK, number> => ({ tonA: v.tonA, tonB: v.tonB, tongue: v.tongue });
 const calOk = (c: Cal | null) => !!c && MOVES.every(m => c[m]?.detectable);
@@ -44,65 +44,79 @@ const KINDS = [
   { rind: "#7048e8", flesh: "#d0bfff", dark: "#4527b0" },   // plum
   { rind: "#8a6b3b", flesh: "#94d82d", dark: "#5c4521" },   // kiwi
 ];
-type Fruit = { id: number; kind: number; x: number; y: number; vx: number; vy: number; r: number; rot: number; vr: number; bomb: boolean; half: 0 | 1 | 2; cut: number; life: number };
+type Fruit = { id: number; kind: number; x: number; y: number; vx: number; vy: number; r: number; rot: number; vr: number; bomb: boolean; big: boolean; half: 0 | 1 | 2; cut: number; life: number };
 type Part = { x: number; y: number; vx: number; vy: number; life: number; max: number; col: string; r: number };
 type Pop = { x: number; y: number; text: string; t: number; col: string };
 type Fx = { kind: "swipe" | "poke"; dir: number; t0: number };
 type Per = Record<M, { uses: number; hits: number; fruits: number }>;
 const per0 = (): Per => ({ tright: { uses: 0, hits: 0, fruits: 0 }, tleft: { uses: 0, hits: 0, fruits: 0 }, tout: { uses: 0, hits: 0, fruits: 0 } });
 type G = {
-  wh: number; stage: "ready" | "play" | "done"; readyLeft: number; t: number; fruits: Fruit[]; parts: Part[]; pops: Pop[]; fx: Fx[]; nid: number; nextWave: number;
+  wh: number; stage: "ready" | "play" | "done"; readyLeft: number; t: number; fruits: Fruit[]; parts: Part[]; pops: Pop[]; fx: Fx[]; nid: number; nextWave: number; nextBig: number;
   points: number; sliced: number; bestCombo: number; swings: number; hitSwings: number; spiky: number; per: Per;
   lev: Record<M, number>; on: Record<M, boolean>; cd: number; pokeAt: number; manual: boolean; adjust: boolean; lostSince: number | null; hint: string; practice: boolean; flash: number;
 };
-const fresh = (wh: number): G => ({ wh, stage: "ready", readyLeft: 4, t: 0, fruits: [], parts: [], pops: [], fx: [], nid: 1, nextWave: .6, points: 0, sliced: 0, bestCombo: 0, swings: 0, hitSwings: 0, spiky: 0, per: per0(), lev: { tright: 0, tleft: 0, tout: 0 }, on: { tright: false, tleft: false, tout: false }, cd: 0, pokeAt: -1, manual: false, adjust: false, lostSince: null, hint: "", practice: false, flash: 0 });
+const fresh = (wh: number): G => ({ wh, stage: "ready", readyLeft: 4, t: 0, fruits: [], parts: [], pops: [], fx: [], nid: 1, nextWave: .6, nextBig: 7, points: 0, sliced: 0, bestCombo: 0, swings: 0, hitSwings: 0, spiky: 0, per: per0(), lev: { tright: 0, tleft: 0, tout: 0 }, on: { tright: false, tleft: false, tout: false }, cd: 0, pokeAt: -1, manual: false, adjust: false, lostSince: null, hint: "", practice: false, flash: 0 });
 const BY = (wh: number) => wh * .46, BH = 82, COLW = 68;
 
+// Normal fruit comes up on the left or the right side. Fruit on the left needs a left swipe, fruit on the right needs a right swipe.
 function launch(s: G, spiky: boolean) {
-  const t = s.t, diff = clamp(t / 60, 0, 1);
-  const n = Math.random() < .25 + .3 * diff ? (Math.random() < .5 ? 4 : 3) : Math.random() < .6 ? 2 : 1;
-  const by = BY(s.wh), apex = by + rnd(-60, 70), ax = rnd(70, W - 70), spread = rnd(60, 96);
-  for (let i = 0; i < n; i++) {
-    const x0 = clamp(ax + (i - (n - 1) / 2) * spread + rnd(-16, 16), 36, W - 36), y0 = s.wh + FR + 10, ya = apex + rnd(-26, 26);
-    const vy = -Math.sqrt(2 * GRAV * (y0 - ya)), vx = (W / 2 - x0) * rnd(.06, .22) + rnd(-18, 18);
-    const bomb = spiky && t > 10 && Math.random() < .13 + .07 * diff && n > 1;
-    s.fruits.push({ id: s.nid++, kind: Math.floor(Math.random() * KINDS.length), x: x0, y: y0 + i * rnd(0, 18), vx, vy: vy * rnd(.97, 1.03), r: FR * rnd(.92, 1.08), rot: rnd(0, 6.28), vr: rnd(-3, 3), bomb, half: 0, cut: 0, life: 0 });
+  const t = s.t, diff = clamp(t / 60, 0, 1), by = BY(s.wh);
+  const both = t > 12 && Math.random() < .25 + .25 * diff;
+  const sides: (1 | -1)[] = both ? [-1, 1] : [Math.random() < .5 ? -1 : 1];
+  for (const side of sides) {
+    const n = both ? (Math.random() < .5 ? 1 : 2) : Math.random() < .3 + .3 * diff ? 3 : Math.random() < .6 ? 2 : 1;
+    const apex = by + rnd(-50, 55), spread = 62;
+    for (let i = 0; i < n; i++) {
+      const d = clamp(rnd(70, 125) + i * (spread * .5) + rnd(-10, 10), 48, W / 2 - 38), xx = W / 2 + side * d, y0 = s.wh + FR + 10, ya = apex + rnd(-22, 22);
+      const vy = -Math.sqrt(2 * GRAV * (y0 - ya)), vx = side * rnd(-6, 22);
+      const bomb = spiky && t > 10 && Math.random() < .12 + .06 * diff && (n > 1 || both);
+      s.fruits.push({ id: s.nid++, kind: Math.floor(Math.random() * KINDS.length), x: xx, y: y0 + i * rnd(0, 16), vx, vy: vy * rnd(.97, 1.03), r: FR * rnd(.92, 1.08), rot: rnd(0, 6.28), vr: rnd(-3, 3), bomb, big: false, half: 0, cut: 0, life: 0 });
+    }
   }
+}
+// The big golden watermelon comes up the middle. Only "tongue out" slices it.
+function launchBig(s: G) {
+  const by = BY(s.wh), y0 = s.wh + 80, ya = by + rnd(-60, 20), vy = -Math.sqrt(2 * GRAV * (y0 - ya));
+  s.fruits.push({ id: s.nid++, kind: 2, x: W / 2 + rnd(-24, 24), y: y0, vx: rnd(-6, 6), vy, r: 62, rot: rnd(0, 6.28), vr: rnd(-1, 1), bomb: false, big: true, half: 0, cut: 0, life: 0 });
 }
 function juice(s: G, x: number, y: number, col: string, n = 14) { for (let i = 0; i < n; i++) { const a = rnd(0, 6.28), v = rnd(60, 240); s.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, life: 0, max: rnd(.4, .9), col, r: rnd(2, 5) }); } }
 
 // which fruit does this action reach?
 function reach(f: Fruit, kind: M, by: number) {
   if (f.half) return false;
-  if (kind === "tout") return Math.abs(f.x - W / 2) <= COLW + f.r * .3 && f.y > -20 && f.y < by * 2.1;
+  if (kind === "tout") return f.big && f.y > -20 && f.y < s_wh_guard(by);
+  if (f.big) return false;
   const inBand = Math.abs(f.y - by) <= BH + f.r * .4;
-  return inBand && (kind === "tright" ? f.x >= W * .28 : f.x <= W * .72);
+  return inBand && (kind === "tright" ? f.x >= W / 2 : f.x < W / 2);
 }
+const s_wh_guard = (by: number) => by * 2.3;
 function doMove(s: G, m: M, now: number, haptics: boolean) {
   const by = BY(s.wh); s.cd = .3; s.swings++; s.per[m].uses++; s.fx.push({ kind: m === "tout" ? "poke" : "swipe", dir: m === "tleft" ? -1 : 1, t0: now });
-  const hit = s.fruits.filter(f => reach(f, m, by)), good = hit.filter(f => !f.bomb), bad = hit.filter(f => f.bomb);
-  const n = good.length;
-  for (const f of good) {
+  const hit = s.fruits.filter(f => reach(f, m, by)), big = hit.filter(f => f.big), good = hit.filter(f => !f.bomb && !f.big), bad = hit.filter(f => f.bomb);
+  const n = good.length + big.length;
+  for (const f of [...good, ...big]) {
     const col = KINDS[f.kind].flesh, cut = m === "tout" ? 0 : Math.PI / 2;
     s.fruits = s.fruits.filter(q => q !== f);
     for (const h of [1, 2] as const) s.fruits.push({ ...f, id: s.nid++, half: h, cut, vx: f.vx + (m === "tout" ? (h === 1 ? -90 : 90) : (m === "tleft" ? -50 : 50)), vy: f.vy + (m === "tout" ? -40 : (h === 1 ? -110 : 60)), vr: f.vr + (h === 1 ? -2 : 2), life: 0 });
     juice(s, f.x, f.y, col, 16);
   }
   for (const f of bad) { s.fruits = s.fruits.filter(q => q !== f); juice(s, f.x, f.y, "#ff7a9c", 20); s.spiky++; s.flash = .4; }
-  let pts = 10 * n + bonus(n) - 10 * bad.length;
+  let pts = 10 * good.length + bonus(good.length) + 50 * big.length - 10 * bad.length;
   if (bad.length && s.points + pts < 0) pts = -s.points;
-  s.points += pts; s.sliced += n; if (n > 0) { s.hitSwings++; s.per[m].hits++; s.per[m].fruits += n; s.bestCombo = Math.max(s.bestCombo, n); }
+  s.points += pts; s.sliced += n; if (n > 0) { s.hitSwings++; s.per[m].hits++; s.per[m].fruits += n; s.bestCombo = Math.max(s.bestCombo, good.length); }
   if (n > 0 || bad.length) {
     const all = hit, cx = all.reduce((a, f) => a + f.x, 0) / all.length, cy = all.reduce((a, f) => a + f.y, 0) / all.length;
-    const text = bad.length && !n ? "Spiky! −10" : n >= 2 ? `${n} fruit! +${pts}` : `+${pts}`;
-    s.pops.push({ x: clamp(cx, 60, W - 60), y: cy - 30, text, t: now, col: bad.length ? "#ff9db4" : n >= 3 ? "#ffe08a" : "#ffffff" });
+    const text = big.length ? `Giant! +${pts}` : bad.length && !n ? "Spiky! −10" : n >= 2 ? `${n} fruit! +${pts}` : `+${pts}`;
+    s.pops.push({ x: clamp(cx, 60, W - 60), y: cy - 30, text, t: now, col: bad.length ? "#ff9db4" : big.length || n >= 3 ? "#ffe08a" : "#ffffff" });
   }
   if (haptics) buzz(n >= 3 ? [30, 30, 60] : n > 0 ? 30 : 10);
 }
 
 // ---------- drawing ----------
 function drawFruit(c: CanvasRenderingContext2D, f: Fruit) {
-  const k = KINDS[f.kind]; c.save(); c.translate(f.x, f.y); c.rotate(f.rot);
+  const k = KINDS[f.kind]; c.save(); c.translate(f.x, f.y);
+  if (f.big && !f.half) { const p = .5 + .5 * Math.sin(f.life * 6); c.save(); c.shadowColor = "#ffd54a"; c.shadowBlur = 24 + 12 * p; c.strokeStyle = `rgba(255,213,74,${.55 + .35 * p})`; c.lineWidth = 6; c.beginPath(); c.arc(0, 0, f.r + 6, 0, 7); c.stroke(); c.restore(); }
+  c.rotate(f.rot);
   if (f.bomb) {
     c.fillStyle = "#2b1840"; c.strokeStyle = "#ff7a9c"; c.lineWidth = 2.5;
     c.beginPath(); for (let i = 0; i < 16; i++) { const a = i * Math.PI / 8, rr = i % 2 ? f.r * .8 : f.r * 1.12; c.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } c.closePath(); c.fill(); c.stroke();
@@ -134,8 +148,10 @@ function drawWorld(c: CanvasRenderingContext2D, s: G, now: number, showZones: bo
   const bg = c.createLinearGradient(0, 0, 0, wh); bg.addColorStop(0, "#14194a"); bg.addColorStop(.55, "#3a2a6e"); bg.addColorStop(1, "#8a3f6e"); c.fillStyle = bg; c.fillRect(0, 0, W, wh);
   c.strokeStyle = "rgba(255,255,255,.05)"; c.lineWidth = 1; for (let i = 0; i < 9; i++) { const x = ((i * 47 + now * .01) % (W + 40)) - 20; c.beginPath(); c.moveTo(x, 0); c.lineTo(x - 30, wh); c.stroke(); }
   if (showZones) {
-    c.fillStyle = "rgba(143,208,255,.07)"; c.fillRect(0, by - BH, W, BH * 2); c.fillRect(W / 2 - COLW, 0, COLW * 2, by * 2.1);
-    c.strokeStyle = "rgba(143,208,255,.28)"; c.lineWidth = 1.5; c.setLineDash([6, 8]); c.strokeRect(-2, by - BH, W + 4, BH * 2); c.strokeRect(W / 2 - COLW, -2, COLW * 2, by * 2.1); c.setLineDash([]);
+    c.fillStyle = "rgba(143,208,255,.06)"; c.fillRect(0, by - BH, W / 2, BH * 2); c.fillStyle = "rgba(255,157,180,.06)"; c.fillRect(W / 2, by - BH, W / 2, BH * 2);
+    c.strokeStyle = "rgba(255,255,255,.22)"; c.lineWidth = 1.5; c.setLineDash([6, 8]); c.strokeRect(-2, by - BH, W + 4, BH * 2); c.beginPath(); c.moveTo(W / 2, by - BH); c.lineTo(W / 2, by + BH); c.stroke(); c.setLineDash([]);
+    c.fillStyle = "rgba(255,255,255,.55)"; c.font = "600 12px Figtree, Arial, sans-serif"; c.textAlign = "left"; c.fillText("◀ SWIPE LEFT", 10, by - BH + 18); c.textAlign = "right"; c.fillText("SWIPE RIGHT ▶", W - 10, by - BH + 18);
+    if (s.fruits.some(f => f.big && !f.half)) { const p = .5 + .5 * Math.sin(now / 160); c.fillStyle = `rgba(255,213,74,${.5 + .4 * p})`; c.font = "700 14px Figtree, Arial, sans-serif"; c.textAlign = "center"; c.fillText("OPEN MOUTH · TONGUE OUT", W / 2, by - BH - 14); }
   }
   for (const f of s.fruits) drawFruit(c, f);
   for (const p of s.parts) { c.globalAlpha = clamp(1 - p.life / p.max, 0, 1); c.fillStyle = p.col; c.beginPath(); c.arc(p.x, p.y, p.r, 0, 7); c.fill(); } c.globalAlpha = 1;
@@ -260,11 +276,13 @@ export default function Slice() {
             if (s.pokeAt >= 0) { if (!s.on.tout) s.pokeAt = -1; else if (now - s.pokeAt > 150) { s.pokeAt = -1; if (s.lev.tright < .5 && s.lev.tleft < .5) doMove(s, "tout", now, cfg.current.haptics); } }
           }
         }
+        s.nextBig -= dt; if (s.nextBig <= 0) { launchBig(s); s.nextBig = rnd(9, 13); }
         s.nextWave -= dt; if (s.nextWave <= 0) { launch(s, cfg.current.spiky); s.nextWave = rnd(1.5, 2.1) - .5 * clamp(s.t / 90, 0, 1); }
         // hint
         let hint = ""; const by = BY(s.wh);
-        if (cfg.current.hints) { const inB = s.fruits.filter(f => !f.half && !f.bomb && Math.abs(f.y - by) <= BH), inC = s.fruits.filter(f => !f.half && !f.bomb && Math.abs(f.x - W / 2) <= COLW);
-          if (inB.length >= 2) { const r = inB.filter(f => f.x >= W * .28).length, l = inB.filter(f => f.x <= W * .72).length; hint = r >= l ? "Swipe right!" : "Swipe left!"; } else if (inB.length === 1) hint = inB[0].x > W / 2 ? "Swipe right" : "Swipe left"; else if (inC.length) hint = "Poke!"; }
+        if (cfg.current.hints) {
+          if (s.fruits.some(f => f.big && !f.half && f.y < s.wh)) hint = "Tongue out!";
+          else { const inB = s.fruits.filter(f => !f.half && !f.bomb && !f.big && Math.abs(f.y - by) <= BH), R = inB.filter(f => f.x >= W / 2).length, L = inB.length - R; if (inB.length) hint = R >= L ? "Swipe right!" : "Swipe left!"; } }
         s.hint = hint;
         if (s.t >= cfg.current.len && !finished) { finished = true; s.stage = "done"; finish(true); }
       }
@@ -317,11 +335,11 @@ export default function Slice() {
 
     if (view === "ready") return (
       <Page><h1 className="font-display text-3xl">How to play</h1><Rule />
-        <p className="mt-2 text-navy/70">Fruit flies up from the bottom. Use your tongue to slice it before it falls. Slice more than one at once for bonus points.</p>
+        <p className="mt-2 text-navy/70">Fruit flies up on the left or the right. Swipe your tongue the same way to slice it: left side, swipe left; right side, swipe right. Now and then a big golden watermelon comes up the middle. Open your mouth and stick your tongue out to slice it for 50 points.</p>
         <ul className="mt-4 grid gap-2">{MOVES.map(m => <li key={m} className="flex items-center gap-3 rounded-2xl bg-paper p-3 shadow-soft"><span className="rounded-full bg-[#0f1038] p-1"><Glyph m={m} size={44} /></span><span className="flex-1"><b>{INFO[m].action}</b><br /><span className="text-sm text-navy/70">{INFO[m].tip}</span></span></li>)}</ul>
-        <div className="mt-4 rounded-2xl bg-paper p-4 text-sm shadow-soft"><b>Combos</b><p className="mt-1 text-navy/70">1 fruit: 10 points. 2 at once: +10 bonus. 3: +30. 4: +60. 5: +100.</p>
+        <div className="mt-4 rounded-2xl bg-paper p-4 text-sm shadow-soft"><b>Combos</b><p className="mt-1 text-navy/70">1 fruit: 10 points. 2 on the same side at once: +10 bonus. 3: +30. 4: +60. Golden watermelon: 50.</p>
           {st.spiky && <p className="mt-2 text-navy/70">Spiky fruit costs 10 points. Let those fall.</p>}</div>
-        <p className="mt-3 text-xs text-navy/60">The dashed zones on screen show where each move reaches. Nothing ends your run, so go at your own pace.</p>
+        <p className="mt-3 text-xs text-navy/60">The dashed band shows where swipes reach. Nothing ends your run, so go at your own pace.</p>
         <button className="btn-primary mt-6 min-h-[60px] w-full text-lg" disabled={busy} onClick={() => startGame()}>{busy ? "Starting camera…" : "I’m ready"}</button>
         <button className="btn-quiet mt-3 w-full" onClick={() => setView("hub")}>Back</button></Page>);
 
