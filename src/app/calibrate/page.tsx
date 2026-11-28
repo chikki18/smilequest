@@ -7,7 +7,7 @@ import { VIDEO_CONSENT_VERSION } from "@/lib/daily";
 
 // ---------- what we measure ----------
 type Id = "smile" | "brow" | "frown" | "pucker" | "right" | "left" | "tright" | "tleft" | "tout" | "close";
-type SK = "smile" | "brow" | "frown" | "pucker" | "close" | "sideA" | "sideB" | "tonA" | "tonB" | "tongue";
+type SK = "smile" | "brow" | "frown" | "pucker" | "close" | "sideA" | "sideB" | "tonA" | "tonB" | "tongue" | "jaw" | "lnA" | "lnB";
 type Step = "intro" | "align" | "rest" | Id | "review";
 const ORDER: Step[] = ["intro", "align", "rest", "smile", "brow", "frown", "pucker", "right", "left", "close", "tright", "tleft", "tout", "review"];
 const MOVES: Id[] = ["smile", "brow", "frown", "pucker", "right", "left", "close", "tright", "tleft", "tout"];
@@ -23,11 +23,12 @@ const COPY: Record<Id, { title: string; cue: string; tip: string; games: string 
   tout: { title: "Tongue out", cue: "Open your mouth and stick your tongue out", tip: "Open your mouth wide, then stick your tongue out and hold. Watch the “Detected” bar fill.", games: "Fruit Slice" },
   close: { title: "Gentle eye closure", cue: "Close your eyes softly", tip: "Soft, like resting. No squeezing.", games: "Flight" },
 };
-const MINSK: Record<SK, number> = { smile: .015, brow: .015, frown: .04, pucker: .08, close: .08, sideA: .08, sideB: .08, tonA: .03, tonB: .03, tongue: .12 };
+const MINSK: Record<SK, number> = { smile: .015, brow: .015, frown: .04, pucker: .08, close: .08, sideA: .08, sideB: .08, tonA: .02, tonB: .02, tongue: .1, jaw: .1, lnA: .03, lnB: .03 };
+const EASYK: SK[] = ["tonA", "tonB", "tongue", "jaw", "lnA", "lnB"], PARTNER: Partial<Record<SK, SK>> = { tonA: "tonB", tonB: "tonA", lnA: "lnB", lnB: "lnA" };
 const CAL_KEYS = ["smile", "brow", "pucker", "close", "liftL", "liftR", "browL", "browR", "closeL", "closeR"] as (keyof Vals)[];
 const FSIDES: Record<string, (keyof Vals)[] | null> = { smile: ["liftL", "liftR"], brow: ["browL", "browR"], pucker: null, close: ["closeL", "closeR"] };
-const sig = (v: Vals): Record<SK, number> => ({ smile: v.smile, brow: v.brow, frown: v.frown, pucker: v.pucker, close: v.close, sideA: v.sideA - 0.6 * v.sideB + 0.3 * v.pucker, sideB: v.sideB - 0.6 * v.sideA + 0.3 * v.pucker, tonA: v.tonA, tonB: v.tonB, tongue: v.tongue });
-const SKS: SK[] = ["smile", "brow", "frown", "pucker", "close", "sideA", "sideB", "tonA", "tonB", "tongue"];
+const sig = (v: Vals): Record<SK, number> => ({ smile: v.smile, brow: v.brow, frown: v.frown, pucker: v.pucker, close: v.close, sideA: v.sideA - 0.6 * v.sideB + 0.3 * v.pucker, sideB: v.sideB - 0.6 * v.sideA + 0.3 * v.pucker, tonA: v.tonA, tonB: v.tonB, tongue: v.tongue, jaw: v.jaw, lnA: v.lnA, lnB: v.lnB });
+const SKS: SK[] = ["smile", "brow", "frown", "pucker", "close", "sideA", "sideB", "tonA", "tonB", "tongue", "jaw", "lnA", "lnB"];
 const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / (a.length || 1);
 const sd = (a: number[]) => { const m = mean(a); return Math.sqrt(mean(a.map(x => (x - m) ** 2))); };
 const topMean = (a: number[]) => mean([...a].sort((x, y) => y - x).slice(0, Math.max(5, Math.floor(a.length / 4))));
@@ -154,7 +155,8 @@ export default function Calibrate() {
     const nu = S.current.neutral, sm = S.current.samples;
     const status = {} as Record<Id, "ok" | "weak" | "skipped">; const flight: Record<string, any> = {}, dash: Record<string, any> = {};
     if (!nu) { for (const m of MOVES) status[m] = "skipped"; return { flight, dash, neutral: {}, status }; }
-    const mv = (s: Vals[], k: SK, key?: SK) => { const kk = key ?? k, a = s.map(v => sig(v)[kk]), n = nu.sk[kk], peak = topMean(a), range = peak - n.mean; return { key: kk, nm: n.mean, std: n.std, peak, range, detectable: range > Math.max(3 * n.std, MINSK[kk]) }; };
+    const mv = (s: Vals[], k: SK, key?: SK) => { const kk = key ?? k, a = s.map(v => sig(v)[kk]), n = nu.sk[kk], peak = topMean(a), range = peak - n.mean; return { key: kk, nm: n.mean, std: n.std, peak, range, detectable: EASYK.includes(kk) ? range > Math.max(2 * n.std, MINSK[kk]) : range > Math.max(3 * n.std, MINSK[kk]) }; };
+    const best = (s: Vals[], keys: SK[]) => keys.map(k => mv(s, k)).reduce((a, b) => (b.range / MINSK[b.key as SK] > a.range / MINSK[a.key as SK] ? b : a));
     for (const k of ["smile", "brow", "pucker", "close"] as const) {
       const s = sm[k]; if (!s?.length) { status[k] = "skipped"; continue; }
       const n = nu.raw[k], peak = topMean(s.map(v => v[k] as number)), range = peak - n.mean, detectable = range > Math.max(3 * n.std, MINSK[k]);
@@ -168,9 +170,9 @@ export default function Calibrate() {
     if (sm.right?.length) { const lk = S.current.lockRight, a = mv(sm.right, "sideA"), b = mv(sm.right, "sideB"), win = lk ? mv(sm.right, lk) : a.range / MINSK.sideA >= b.range / MINSK.sideB ? a : b; rk = win.key; dash.right = win; status.right = win.detectable ? "ok" : "weak"; } else status.right = "skipped";
     if (sm.left?.length && rk) { const w = mv(sm.left, "sideA", rk === "sideA" ? "sideB" : "sideA"); dash.left = w; status.left = w.detectable ? "ok" : "weak"; } else status.left = "skipped";
     let tk: SK | null = S.current.lockTRight;
-    if (sm.tright?.length) { const lk = S.current.lockTRight, a = mv(sm.tright, "tonA"), b = mv(sm.tright, "tonB"), win = lk ? mv(sm.tright, lk) : a.range / MINSK.tonA >= b.range / MINSK.tonB ? a : b; tk = win.key; dash.tright = win; status.tright = win.detectable ? "ok" : "weak"; } else status.tright = "skipped";
-    if (sm.tleft?.length && tk) { const w = mv(sm.tleft, "tonA", tk === "tonA" ? "tonB" : "tonA"); dash.tleft = w; status.tleft = w.detectable ? "ok" : "weak"; } else status.tleft = "skipped";
-    if (sm.tout?.length) { const w = mv(sm.tout, "tongue"); dash.tout = w; status.tout = w.detectable ? "ok" : "weak"; } else status.tout = "skipped";
+    if (sm.tright?.length) { const lk = S.current.lockTRight, win = lk ? mv(sm.tright, lk) : best(sm.tright, ["tonA", "tonB", "lnA", "lnB"]); tk = win.key as SK; dash.tright = win; status.tright = win.detectable ? "ok" : "weak"; } else status.tright = "skipped";
+    if (sm.tleft?.length && tk) { const w = mv(sm.tleft, tk, PARTNER[tk] ?? "tonB"); dash.tleft = w; status.tleft = w.detectable ? "ok" : "weak"; } else status.tleft = "skipped";
+    if (sm.tout?.length) { const w = best(sm.tout, ["tongue", "jaw"]); dash.tout = w; status.tout = w.detectable ? "ok" : "weak"; } else status.tout = "skipped";
     const neutral: Record<string, { mean: number; std: number }> = {}; for (const k of CAL_KEYS) neutral[k as string] = nu.raw[k as string];
     return { flight, dash, neutral, status };
   }
@@ -219,10 +221,10 @@ export default function Calibrate() {
                   r.neutral = nu; r.ac0 = meanAC(r.acBuf); r.phase = "flash"; r.flashUntil = now + 1100; buzz(100);
                 } else { r.fails++; r.phase = "brief"; r.phaseStart = now; }
               } else if (r.neutral) {
-                const nu = r.neutral, tng = id === "tright" || id === "tleft", fam: SK[] = tng ? ["tonA", "tonB"] : ["sideA", "sideB"], isR = id === "right" || id === "tright", isL = id === "left" || id === "tleft", rkey = tng ? (r.trightKey ?? r.lockTRight) : (r.rightKey ?? r.lockRight), lockK = tng ? r.lockTRight : r.lockRight, cands: SK[] = isR ? (lockK ? [lockK] : fam) : isL ? (rkey ? [rkey === fam[0] ? fam[1] : fam[0]] : fam) : [id === "tout" ? "tongue" : id as SK];
+                const nu = r.neutral, tng = id === "tright" || id === "tleft", fam: SK[] = tng ? ["tonA", "tonB", "lnA", "lnB"] : ["sideA", "sideB"], isR = id === "right" || id === "tright", isL = id === "left" || id === "tleft", rkey = tng ? (r.trightKey ?? r.lockTRight) : (r.rightKey ?? r.lockRight), lockK = tng ? r.lockTRight : r.lockRight, cands: SK[] = isR ? (lockK ? [lockK] : fam) : isL ? (rkey ? [(tng ? PARTNER[rkey] : (rkey === "sideA" ? "sideB" : "sideA")) ?? fam[0]] : fam) : id === "tout" ? ["tongue", "jaw"] : [id as SK];
                 let bk = cands[0], br = -9;
                 for (const k of cands) { const a = r.buf.map(q => sig(q)[k]), n = nu.sk[k], ratio = (topMean(a) - n.mean) / Math.max(3 * n.std, MINSK[k]); if (ratio > br) { br = ratio; bk = k; } }
-                if (br > (easy ? (r.fails >= 2 ? 0.25 : 0.5) : 1)) { r.samples[id] = r.buf; if (id === "right") r.rightKey = bk; if (id === "tright") r.trightKey = bk; r.phase = "flash"; r.flashUntil = now + 1200; buzz(110); }
+                if (br > (easy ? (r.fails >= 2 ? 0.12 : 0.4) : 1)) { r.samples[id] = r.buf; if (id === "right") r.rightKey = bk; if (id === "tright") r.trightKey = bk; r.phase = "flash"; r.flashUntil = now + 1200; buzz(110); }
                 else { r.fails++; r.phase = "brief"; r.phaseStart = now; r.buf = []; }
               } else enter("rest");
             }
@@ -232,8 +234,8 @@ export default function Calibrate() {
       }
       let live = 0;
       if ((r.step === "tright" || r.step === "tleft" || r.step === "tout") && r.neutral && good) {
-        const nu = r.neutral, v = sig(fr!.vals!), rk = r.trightKey ?? r.lockTRight, keys: SK[] = r.step === "tout" ? ["tongue"] : r.step === "tleft" ? (rk ? [rk === "tonA" ? "tonB" : "tonA"] : ["tonA", "tonB"]) : (r.lockTRight ? [r.lockTRight] : ["tonA", "tonB"]);
-        live = Math.max(...keys.map(k => Math.max(0, Math.min(1, (v[k] - nu.sk[k].mean) / (Math.max(3 * nu.sk[k].std, MINSK[k]) * 2)))));
+        const nu = r.neutral, v = sig(fr!.vals!), rk = r.trightKey ?? r.lockTRight, keys: SK[] = r.step === "tout" ? ["tongue", "jaw"] : r.step === "tleft" ? (rk ? [PARTNER[rk] ?? "tonB"] : ["tonA", "tonB", "lnA", "lnB"]) : (r.lockTRight ? [r.lockTRight] : ["tonA", "tonB", "lnA", "lnB"]);
+        live = Math.max(...keys.map(k => Math.max(0, Math.min(1, (v[k] - nu.sk[k].mean) / (Math.max(2 * nu.sk[k].std, MINSK[k]) * 1.5)))));
       }
       if (now - hudT > 100) { hudT = now; setHud({ aligned: r.aligned, locked: r.locked, hint, progress: r.progress, phase: r.phase, skipHint: hudSkip, face, count, live }); }
       drawHud(x, now, face, nx, ny, ok, r.locked, r.step);
